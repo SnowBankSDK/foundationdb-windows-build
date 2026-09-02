@@ -170,7 +170,11 @@ if ($drive) {
     Add-Check "Free disk on $($SourceDrive):" $false 'drive not found'
 }
 
-# 7. Docker (optional, only the smoke test of verify-fdb.ps1 uses it).
+# 7. 7-Zip, used by fetch-macos-client.ps1 to unpack the upstream macOS package (xar, gzip, cpio).
+$sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+Add-Check '7-Zip' (Test-Path $sevenZip) "$sevenZip (7-zip.org; needed to fetch the macOS client files for a release)"
+
+# 8. Docker (optional, only the smoke test of verify-fdb.ps1 uses it).
 $docker = Get-Command docker -ErrorAction SilentlyContinue
 $dockerOk = $false
 if ($docker) { & docker info 2>$null | Out-Null; $dockerOk = ($LASTEXITCODE -eq 0) }
