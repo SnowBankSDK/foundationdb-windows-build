@@ -60,13 +60,17 @@ Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one bui
 4. The new `fdbcli.exe` creates a database on a `foundationdb/foundationdb:<tag>` container, `status
    minimal` reports it available, and a set/get round trip commits.
 
-## Publish handoff
+## Release handoff
 
-Publishing is a maintainer action. Hand over, in the report: the artifact directory, the four file names
-with their SHA-256 (from `build-info.txt`), the verification output, and the release body in the
-format of section 6 of `CLAUDE.md`. The maintainer creates the GitHub release `<tag>` on this
-repository, uploads the files, adds the macOS files, then adds the entry to the
-`FoundationDB.Client.Native` manifest.
+Section 6 of `CLAUDE.md` is the routine; the session's parts are:
+
+1. `.\scripts\release-body.ps1 -ArtifactDir .\artifacts\<tag>` renders `release-body.md`; hand it to the
+   maintainer with the artifact directory and the verification output.
+2. The maintainer creates and publishes the GitHub release `<tag>` on this repository with the body and
+   the four Windows files. Never create or edit a release from a session.
+3. `.\scripts\release-manifest.ps1 -Tag <tag>` checks the published release (assets present, every
+   downloaded asset equal to the local `.sha256`) and writes `manifest-win-x64.json`; every gate must
+   print `PASS`. Hand the snippet to whoever edits `FoundationDB.Client.Native/manifest.json`.
 
 ## When a hunk fails
 

@@ -127,31 +127,49 @@ The script stops at the first failure with `BUILD FAILED: <reason>` in the log a
    set/get round trip through the new `fdbcli.exe`, then removes the container. Without Docker the gate
    is skipped with a message; run it on a host with Docker before publishing.
 
-## 6. Publish
+## 6. Releasing
 
-Publishing is a manual step by a maintainer with write access to this repository.
+A release of this repository is the GitHub release named after the upstream tag, carrying the Windows
+files built here (and the macOS files built separately), and the matching entry in the
+`FoundationDB.Client.Native` package's `manifest.json` in the .NET client repository. The maintainer
+does the parts that need write access (creating the release, uploading, editing the manifest); a
+session prepares every input and checks every result. Steps in order, each with who does it:
 
-1. Create the GitHub release named and tagged `<tag>` (for example `7.4.7`) on this repository.
-2. Upload the four Windows files from `artifacts\<tag>\`: `fdb_c.dll`, `fdb_c.dll.sha256`, `fdbcli.exe`,
-   `fdbcli.exe.sha256`. The macOS files (`libfdb_c.dylib`, `fdbcli` and their `.sha256`) come from a
-   separate macOS build and are uploaded to the same release.
-3. Release body, the format of the existing releases:
+1. **Session: gates before anything is published.** `verify-fdb.ps1 -ArtifactDir .\artifacts\<tag>` ends
+   with `VERIFY PASSED` and its output is kept for the report. Every gate of section 5 must be green,
+   the smoke test included; a verification without Docker is not enough for a release.
+2. **Session: render the release body.** `.\scripts\release-body.ps1 -ArtifactDir .\artifacts\<tag>`
+   writes `artifacts\<tag>\release-body.md`: the title line, the two Windows files with their SHA-256,
+   the two macOS lines (placeholders until the macOS build exists), and one line with the upstream tag
+   and commit, the protocol, the toolchain versions and the patch set. Hand it to the maintainer as is.
+3. **Maintainer: create the release.** On this repository, a release with tag and title `<tag>` (the
+   upstream tag, for example `7.4.7`), the body from step 2, and the four Windows files from
+   `artifacts\<tag>\`: `fdb_c.dll`, `fdb_c.dll.sha256`, `fdbcli.exe`, `fdbcli.exe.sha256`. Publish it (not
+   a draft: a draft's asset URLs do not resolve for consumers). The macOS files (`libfdb_c.dylib`,
+   `fdbcli` and their `.sha256`) join the same release when they exist; the body's two macOS lines are
+   then re-rendered with `release-body.ps1 -DylibSha256 <hash> -MacCliSha256 <hash>`.
+4. **Session: check the release and write the manifest snippet.** `.\scripts\release-manifest.ps1 -Tag <tag>`
+   checks, through the GitHub CLI, that the release exists and is published, that the four Windows
+   assets are uploaded, downloads each one and compares its hash with the local `.sha256`, and compares
+   the uploaded `.sha256` files too. Every gate must print `PASS`; on any `FAIL` the script exits 1 and
+   writes nothing. On success it writes `artifacts\<tag>\manifest-win-x64.json`: the two `win-x64`
+   objects of the `<tag>` entry, with the asset URLs GitHub reports and the verified checksums.
+5. **Maintainer (or a session in the .NET client repository): the manifest entry.** In
+   `FoundationDB.Client.Native/manifest.json`, the `<tag>` entry holds 8 files: the 2 `win-x64` objects
+   pasted from step 4, the `linux-x64` and `linux-arm64` pairs from the upstream `apple/foundationdb`
+   release (URLs `https://github.com/apple/foundationdb/releases/download/<tag>/<file>`, checksums from
+   its `.sha256` assets), and the 2 `osx-arm64` objects from the macOS build. Bumping `latest` is a
+   separate decision, not part of adding the entry. `DownloadBinaries.ps1 -version <tag> -full` in that
+   directory then fetches every file and verifies every checksum; it must end with `Download complete.`
+6. **Maintainer: the package.** The .NET client repository's own release routine (its `CLAUDE.md`,
+   "Releasing") packs and publishes `FoundationDB.Client.Native` with the bumped `VersionPrefix`.
 
-   ```
-   Windows and macOS Client Binaries for FoundationDB <tag>
+Gates, as a list: all `verify-fdb.ps1` gates green; the release exists and is published; the four
+Windows assets uploaded; every downloaded asset equals the local `.sha256`; `manifest-win-x64.json`
+written; `DownloadBinaries.ps1` green on the full entry.
 
-   - Windows x86_64:
-     - `fdb_c.dll`, SHA256 `<hash>`
-     - `fdbcli.exe`, SHA256 `<hash>`
-
-   - macOS arm64:
-     - `libfdb_c.dylib`: SHA256 `<hash>`
-     - `fdbcli`: SHA256 `<hash>`
-   ```
-
-4. Consumers download `https://github.com/SnowBankSDK/foundationdb-windows-build/releases/download/<tag>/<file>`.
-   The `FoundationDB.Client.Native` NuGet package pins these URLs and checksums in its `manifest.json`;
-   add the entry there after the release exists.
+`release-manifest.ps1` is read-only against GitHub: it never creates or edits a release. Running it
+against an older tag (`-Tag 7.4.4 -ArtifactDir <the 7.4.4 drop>`) is a safe rehearsal.
 
 ## 7. Known failures and what to do
 
@@ -212,6 +230,8 @@ scripts\check-prereqs.ps1      prerequisite table, exit 1 on any failure
 scripts\build-boost.ps1        Boost 1.86.0 static libraries with clang-cl
 scripts\build-fdb.ps1          clone, patch, configure, build, package one tag
 scripts\verify-fdb.ps1         exports, version, checksums, live-cluster smoke test
+scripts\release-body.ps1       the GitHub release body rendered from the artifacts
+scripts\release-manifest.ps1   release and asset check through gh, hash comparison, manifest-win-x64.json
 patches\windows-7.3.52.patch   the 7.3 line patch set (8 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
 patches\windows-7.4.7.patch    the 7.4 line patch set (16 files), the one build-fdb.ps1 applies
