@@ -72,7 +72,10 @@ stages the 7 libraries in release. `-Variant 'debug,release'` and `-AllLibraries
 ```
 
 Defaults: sources cloned to `C:\fdb-build\<tag>\foundationdb`, build tree in its `build\` subdirectory,
-artifacts in `.\artifacts\<tag>\` (ignored by git), log at `C:\fdb-build\<tag>\build-<tag>.log`.
+artifacts in `.\artifacts\<tag>\` (ignored by git), log at `C:\fdb-build\<tag>\build-<tag>.log`. The long
+steps write their own progressive logs next to it: `actorcompiler.log`, `build-fdb_c.log`,
+`build-fdbcli.log` (MSBuild buffers its output when piped, so the main log shows a step's tail only
+when the step ends; follow the step log to watch a compile).
 Parameters: `-WorkRoot`, `-SourceDir`, `-OutputDir`, `-LogFile`, `-BoostRoot`, `-OpenSslRoot`, `-VsPath`,
 `-ReferenceClone <local clone>` (seeds the clone from a local repository, then dissociates), `-Jobs`,
 `-Rebuild` (deletes the build tree first), `-SkipClone` (builds an existing, already patched checkout).
@@ -170,8 +173,9 @@ Publishing is a manual step by a maintainer with write access to this repository
   An upstream knob took the name of a Windows macro (`STATUS_TIMEOUT` did in 7.4.7). Add
   `#ifdef _WIN32 / #undef <NAME> / #endif` in the knob header after its `#include` lines (the Windows
   headers come in through `flow/flow.h`, so an `#undef` above the includes does nothing). Keep the knob
-  name; the knob's command-line name stays unchanged. `patches\extra\knob-status-timeout.patch` is the
-  7.3 instance of this fix; on 7.4 tags the branch patch already carries it. Before building a new tag,
+  name; the knob's command-line name stays unchanged. The `patches\extra\knob-status-timeout-*.patch`
+  pair is this fix for `STATUS_TIMEOUT` (header, and the two sources that use the knob); the build
+  script applies whichever still fits the tag. Before building a new tag,
   `git grep -n -E '^\s+(double|int|int64_t|bool)\s+[A-Z_]+;' fdbclient/include/fdbclient/ClientKnobs.h`
   lists the client knobs; any name that also exists as a macro in the Windows SDK's `winnt.h` or
   `winbase.h` needs the same treatment.

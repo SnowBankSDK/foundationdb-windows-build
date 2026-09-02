@@ -40,7 +40,8 @@ Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one bui
    Get-Content C:\fdb-build\7.4.7\build-7.4.7.log -Wait
    ```
 
-   The log ends with `=== done in hh:mm:ss ===` and the artifacts are in `.\artifacts\7.4.7\`. A failure
+   During the `fdb_c` and `fdbcli` steps the compile output goes to `C:\fdb-build\7.4.7\build-fdb_c.log`
+   and `build-fdbcli.log`; follow those to watch progress. The main log ends with `=== done in hh:mm:ss ===` and the artifacts are in `.\artifacts\7.4.7\`. A failure
    ends with `BUILD FAILED: <reason>`; section 7 of `CLAUDE.md` maps each reason to its fix.
 
 4. Verify. All four gates must print `PASS`; the smoke test needs Docker Desktop running and is skipped
