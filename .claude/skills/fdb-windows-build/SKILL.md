@@ -64,13 +64,16 @@ Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one bui
 
 Section 6 of `CLAUDE.md` is the routine; the session's parts are:
 
-1. `.\scripts\release-body.ps1 -ArtifactDir .\artifacts\<tag>` renders `release-body.md`; hand it to the
+1. `.\scripts\fetch-macos-client.ps1 -Tag <tag>` places the four macOS client files (arm64 and x86_64,
+   out of the upstream packages, 7-Zip needed) next to the Windows files; every gate must print `PASS`.
+2. `.\scripts\release-body.ps1 -ArtifactDir .\artifacts\<tag>` renders `release-body.md`; hand it to the
    maintainer with the artifact directory and the verification output.
-2. The maintainer creates and publishes the GitHub release `<tag>` on this repository with the body and
-   the four Windows files. Never create or edit a release from a session.
-3. `.\scripts\release-manifest.ps1 -Tag <tag>` checks the published release (assets present, every
-   downloaded asset equal to the local `.sha256`) and writes `manifest-win-x64.json`; every gate must
-   print `PASS`. Hand the snippet to whoever edits `FoundationDB.Client.Native/manifest.json`.
+3. The maintainer creates and publishes the GitHub release `<tag>` on this repository with the body and
+   the twelve files (six binaries, six `.sha256`). Never create or edit a release from a session.
+4. `.\scripts\release-manifest.ps1 -Tag <tag>` checks the published release (assets present, every
+   downloaded asset equal to the local `.sha256`) and writes `manifest-snippet.json` (the `win-x64`,
+   `osx-arm64` and `osx-x64` objects); every gate must print `PASS`. Hand the snippet to whoever edits
+   `FoundationDB.Client.Native/manifest.json`.
 
 ## When a hunk fails
 
