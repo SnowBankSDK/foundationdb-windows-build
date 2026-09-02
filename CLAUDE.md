@@ -62,8 +62,8 @@ by the same clang major as the FoundationDB build, because CMake's FindBoost loo
 ```
 
 The script downloads and extracts the 1.86.0 sources when they are absent, writes `user-config.jam`
-(clang-cl as the `clang-win` toolset, the MSVC `lib.exe` as archiver), bootstraps `b2` with MSVC, and
-stages the 7 libraries in release. `-Variant 'debug,release'` and `-AllLibraries` produce the full stage.
+(clang-cl as the `clang-win` toolset; the archiver stays unset and resolves to the `lib.exe` on the
+developer-shell `PATH`), builds the `b2` engine with MSVC, and stages the 7 libraries in release. `-Variant 'debug,release'` and `-AllLibraries` produce the full stage.
 
 ## 4. Build
 
@@ -179,6 +179,16 @@ Publishing is a manual step by a maintainer with write access to this repository
   `git grep -n -E '^\s+(double|int|int64_t|bool)\s+[A-Z_]+;' fdbclient/include/fdbclient/ClientKnobs.h`
   lists the client knobs; any name that also exists as a macro in the Windows SDK's `winnt.h` or
   `winbase.h` needs the same treatment.
+- **`bootstrap.bat` ends with "Failed to build Boost.Build engine" and "unable to detect your toolset
+  installation".** The Boost batch files call their helpers by bare name from the engine directory, and a
+  host that sets `NoDefaultCurrentDirectoryInExePath` blocks that. `build-boost.ps1` builds the engine
+  from `tools\build\src\engine` with that directory on `PATH` and the variable cleared for the process;
+  when bootstrapping by hand, do the same (`.\build.bat msvc` in that directory, then copy `b2.exe` to
+  the Boost root and write `using msvc ;` to `project-config.jam`).
+- **`b2` compiles every library and then reports "failed clang-win.archive" for each, with an archive
+  command line that starts at `/nologo /out:`.** The `clang-win` toolset dropped an explicit `<archiver>`
+  whose path has spaces and ran an empty command. Do not set `<archiver>` in `user-config.jam`; the bare
+  `lib.exe` of the developer shell is the archiver. `build-boost.ps1` writes the jam that way.
 - **vcpkg fails at configure** (manifest install of zlib or lz4). The Visual Studio vcpkg component is
   missing, or `VCPKG_ROOT` points elsewhere. `check-prereqs.ps1` shows the path in use. The manifest
   pins the vcpkg baseline `728711b66ff08483628a5f314ac65980930a52be`; a much older vcpkg may not know it.

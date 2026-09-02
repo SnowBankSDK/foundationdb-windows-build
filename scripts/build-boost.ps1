@@ -76,28 +76,38 @@ $msvc = Get-ChildItem (Join-Path $VsPath 'VC\Tools\MSVC') -Directory | Sort-Obje
 $libExe = Join-Path $msvc.FullName 'bin\Hostx64\x64\lib.exe'
 if (-not (Test-Path $libExe)) { Stop-Build "lib.exe not found at $libExe" }
 Write-Host "clang    : $clangVersion (tag clangw$clangMajor)"
-Write-Host "archiver : $libExe"
+Write-Host "archiver : lib.exe from the developer shell PATH ($libExe)"
 
 Import-Module (Join-Path $VsPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
 Enter-VsDevShell -VsInstallPath $VsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
 Set-Location $BoostRoot
 
-# user-config.jam declares the clang-win toolset; paths use forward slashes and stay quoted (they contain spaces).
+# user-config.jam declares the clang-win toolset with the clang-cl path (forward slashes, quoted: it has
+# spaces). No explicit <archiver>: the clang-win toolset drops an archiver value whose path has spaces and
+# then runs an empty archive command ("failed clang-win.archive" on every library). Left unset, the
+# archiver is the bare lib.exe, which the developer shell puts on PATH.
 $jam = @(
     'using clang-win : :',
     "  `"$($clangCl -replace '\\', '/')`"",
-    '  :',
-    "  <archiver> `"$($libExe -replace '\\', '/')`"",
     '  ;'
 ) -join "`n"
 [System.IO.File]::WriteAllText((Join-Path $BoostRoot 'user-config.jam'), $jam + "`n", [System.Text.Encoding]::ASCII)
 Write-Host "user-config.jam written"
 
-# 3. Bootstrap b2 (built with MSVC), once.
+# 3. Bootstrap b2 (the Boost.Build engine, built with MSVC), once. bootstrap.bat calls build.bat, and
+# build.bat calls its helpers (guess_toolset.bat, config_toolset.bat) by bare name from the engine
+# directory; a host that sets NoDefaultCurrentDirectoryInExePath blocks that and build.bat then reports
+# "unable to detect your toolset installation". So the engine is built from its own directory, with that
+# directory on PATH and the variable cleared for this process, then copied to the Boost root.
 if (-not (Test-Path (Join-Path $BoostRoot 'b2.exe'))) {
-    Write-Phase 'bootstrap b2'
-    & cmd /c 'bootstrap.bat' 2>&1 | ForEach-Object { Format-Line $_ }
-    if (-not (Test-Path (Join-Path $BoostRoot 'b2.exe'))) { Stop-Build 'bootstrap.bat produced no b2.exe (see bootstrap.log)' }
+    Write-Phase 'bootstrap b2 (msvc)'
+    $engine = Join-Path $BoostRoot 'tools\build\src\engine'
+    $env:PATH = "$engine;$env:PATH"
+    Remove-Item Env:\NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
+    & cmd /c "cd /d `"$engine`" && .\build.bat msvc" 2>&1 | ForEach-Object { Format-Line $_ }
+    if (-not (Test-Path (Join-Path $engine 'b2.exe'))) { Stop-Build 'build.bat msvc produced no b2.exe (run it from a Visual Studio developer prompt to see why)' }
+    Copy-Item (Join-Path $engine 'b2.exe') (Join-Path $BoostRoot 'b2.exe') -Force
+    [System.IO.File]::WriteAllText((Join-Path $BoostRoot 'project-config.jam'), "using msvc ;`n", [System.Text.Encoding]::ASCII)
 }
 
 # 4. Build and stage.
