@@ -8,6 +8,20 @@ no Docker and no Linux.
 Follow this file top to bottom. Every step is a script under `scripts\`; run them from the repository
 root in Windows PowerShell 5.1 or PowerShell 7. Nothing here needs administrator rights.
 
+## Two lines
+
+Application developers pick the 7.3.x or the 7.4.x client package to match their cluster, so both
+lines get a Windows build for every upstream release, on the same recipe (the 7.3 patch set differs,
+`patches\README.md`). Two rules decide which upstream tag to build:
+
+- **7.3 ships twins.** Every 7.3 release comes as an even (non-AVX) and an odd (AVX) tag of the same
+  code, for example 7.3.78 and 7.3.79. Build and publish the even tag: its Linux files run on every
+  x64 host, the Windows build is unaffected either way, and the release and the package take the even
+  number.
+- **7.4 stopped pairing after 7.4.5.** Every 7.4 tag since then is AVX-only on Linux x64, so there is
+  one tag per release and nothing to choose. Watch the upstream release body: if a non-AVX twin
+  reappears on 7.4, the 7.3 rule applies again.
+
 ## 1. Prerequisites
 
 | Component | Version | Where it comes from |
