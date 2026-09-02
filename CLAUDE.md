@@ -207,6 +207,12 @@ release check) is a safe rehearsal.
   `actorcompiler_build` never runs `dotnet build` under MSBuild. `build-fdb.ps1` builds the actor
   compiler by hand into `build\` before the first target; when running steps by hand, do the same:
   `dotnet build flow\actorcompiler\actorcompiler.csproj -c Release -o build`.
+- **A step's log says it finished but the main log never prints the next phase** (seen on the actor
+  compiler step: `0 Error(s)`, then nothing for many minutes). The script waits for the step's process
+  and its descendants, and MSBuild worker nodes or the shared C# compiler left behind for reuse keep
+  it waiting until their idle timeout. `build-fdb.ps1` now runs the steps with `-nodeReuse:false` and
+  no shared compilation; on an older copy, `dotnet build-server shutdown` and ending the lingering
+  `MSBuild` and `VBCSCompiler` processes release the wait.
 - **CMake cannot find Boost, or links fail on `libboost_*-clangw<N>-...`.** The clang major of the
   staged Boost differs from the clang-cl of Visual Studio (a Visual Studio update changed the clang
   major). `check-prereqs.ps1` names the tags present. Rebuild Boost with `build-boost.ps1`, or pass a

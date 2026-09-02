@@ -200,13 +200,17 @@ try {
     # built by hand into the build root, where every actor-compile rule expects build\actorcompiler.exe.
     Write-Phase 'actor compiler (dotnet build)'
     $t = [System.Diagnostics.Stopwatch]::StartNew()
-    $rc = Invoke-Logged 'actorcompiler' 'dotnet' @('build', (Join-Path $SourceDir 'flow\actorcompiler\actorcompiler.csproj'), '-c', 'Release', '-nologo', '-v', 'q', '-o', $buildDir) $buildDir
+    # No node reuse and no shared compiler: Invoke-Logged waits for the process and its descendants, and the
+    # MSBuild worker nodes and VBCSCompiler that a dotnet build leaves behind for reuse would keep it waiting
+    # for their idle timeout (15 minutes) after the build itself has finished.
+    $rc = Invoke-Logged 'actorcompiler' 'dotnet' @('build', (Join-Path $SourceDir 'flow\actorcompiler\actorcompiler.csproj'), '-c', 'Release', '-nologo', '-v', 'q', '-nodeReuse:false', '-p:UseSharedCompilation=false', '-o', $buildDir) $buildDir
     if ($rc -ne 0) { Stop-Build "actor compiler build failed ($rc)" }
     if (-not (Test-Path (Join-Path $buildDir 'actorcompiler.exe'))) { Stop-Build 'actorcompiler.exe not produced' }
     $timings['actorcompiler'] = $t.Elapsed
 
-    $buildExtra = @()
-    if ($Jobs -gt 0) { $buildExtra = @('--', "/m:$Jobs", "/p:CL_MPCount=$Jobs") }
+    # the same node-reuse rule for the MSBuild runs under cmake --build
+    $buildExtra = @('--', '/nodeReuse:false')
+    if ($Jobs -gt 0) { $buildExtra += @("/m:$Jobs", "/p:CL_MPCount=$Jobs") }
     foreach ($target in @('fdb_c', 'fdbcli')) {
         Write-Phase "build $target"
         $t = [System.Diagnostics.Stopwatch]::StartNew()
