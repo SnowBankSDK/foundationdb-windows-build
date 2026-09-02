@@ -10,7 +10,8 @@ and stub TLS. `scripts\build-fdb.ps1` applies one branch patch by release line, 
 | `windows-7.4.7.patch` | every 7.4 tag (the script rewrites the `VERSION` context to the tag) | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
 | `windows-7.3.52.patch` | every 7.3 tag | 8 |
-| `extra\knob-status-timeout.patch` | tags whose `ClientKnobs.h` still lacks the `#undef` | 1 |
+| `extra\knob-status-timeout-header.patch` | tags whose `ClientKnobs.h` still lacks the `#undef` (7.3.78 and later 7.3 tags) | 1 |
+| `extra\knob-status-timeout-source.patch` | tags where `windows.h` is included after the knob header in the two client sources that use the knob (7.3.78 and later 7.3 tags; harmless on 7.4) | 2 |
 | `vcpkg.json` | copied to the source root of every tag | manifest |
 
 ## The 7.4 patch, hunk by hunk
@@ -85,9 +86,16 @@ Boost: 7.3 asks for `Boost 1.78` as a minimum on Windows, so the same Boost 1.86
 
 `build-fdb.ps1` runs `git apply --check` on every patch in `extra\` after the branch patch, applies the
 ones that fit, and reports the others as skipped. A patch here is a fix that some tags need and others
-already contain. `knob-status-timeout.patch` is the `STATUS_TIMEOUT` `#undef`: the 7.4.7 branch patch
-already carries it (so it is skipped on 7.4), and 7.3 tags from 7.3.78 on need it because the knob was
-back-ported there.
+already contain. The two `knob-status-timeout-*.patch` files are the `STATUS_TIMEOUT` `#undef`, which
+7.3 tags need from 7.3.78 on because upstream back-ported the knob there:
+
+- `-header.patch` puts the `#undef` in `ClientKnobs.h` after its includes. The 7.4.7 branch patch already
+  carries that hunk, so the check fails on 7.4 and the patch is skipped.
+- `-source.patch` puts the same `#undef` in `ClientKnobs.cpp` and `StatusClient.actor.cpp` after their
+  includes. In 7.3 those files include `flow/flow.h` after the knob header, and there `flow.h` pulls in
+  `windows.h` through `Platform.h`, so the macro comes back after the header's `#undef` and the
+  `init( STATUS_TIMEOUT, 30.0 )` line fails with "no matching member function for call to 'initKnob'"
+  (a `DWORD` cannot bind to `double &`). On 7.4 the hunks apply too and change nothing.
 
 ## Porting the set to a new tag
 

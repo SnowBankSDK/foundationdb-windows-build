@@ -1,0 +1,32 @@
+diff --git a/fdbclient/ClientKnobs.cpp b/fdbclient/ClientKnobs.cpp
+index e71780451c..b520140491 100644
+--- a/fdbclient/ClientKnobs.cpp
++++ b/fdbclient/ClientKnobs.cpp
+@@ -26,6 +26,11 @@
+ #include "flow/UnitTest.h"
+ #include "flow/flow.h"
+ 
++#ifdef _WIN32
++// winnt.h defines STATUS_TIMEOUT as an NTSTATUS macro; the client knob of that name is used below.
++#undef STATUS_TIMEOUT
++#endif
++
+ #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
+ 
+ ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
+diff --git a/fdbclient/StatusClient.actor.cpp b/fdbclient/StatusClient.actor.cpp
+index ab3c2d1709..274a256d11 100644
+--- a/fdbclient/StatusClient.actor.cpp
++++ b/fdbclient/StatusClient.actor.cpp
+@@ -31,6 +31,11 @@
+ 
+ #include "flow/actorcompiler.h" // has to be last include
+ 
++#ifdef _WIN32
++// winnt.h defines STATUS_TIMEOUT as an NTSTATUS macro; the client knob of that name is used below.
++#undef STATUS_TIMEOUT
++#endif
++
+ json_spirit::mValue readJSONStrictly(const std::string& s) {
+ 	json_spirit::mValue val;
+ 	std::string::const_iterator i = s.begin();
