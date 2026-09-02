@@ -3,16 +3,15 @@
 #
 # Usage:
 #   .\scripts\release-body.ps1 -ArtifactDir .\artifacts\7.4.7
-#   .\scripts\release-body.ps1 -ArtifactDir .\artifacts\7.4.7 -DylibSha256 <hash> -MacCliSha256 <hash>   # once the macOS files exist
 #
 # The version, source commit and protocol come from fdbcli.exe itself; the toolchain and patch lines
-# come from build-info.txt when build-fdb.ps1 wrote one. Windows PowerShell 5.1 or PowerShell 7.
+# come from build-info.txt when build-fdb.ps1 wrote one. The macOS sections carry the hashes of the
+# files fetch-macos-client.ps1 placed in the directory (libfdb_c.arm64.dylib, fdbcli.arm64,
+# libfdb_c.x86_64.dylib, fdbcli.x86_64), placeholders otherwise. Windows PowerShell 5.1 or PowerShell 7.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $ArtifactDir,
-    [string] $OutFile = '',
-    [string] $DylibSha256 = '',
-    [string] $MacCliSha256 = ''
+    [string] $OutFile = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -28,8 +27,12 @@ foreach ($l in @(& $cli --version 2>&1 | ForEach-Object { "$_" })) {
     if ($l -match '^protocol\s+([0-9a-f]+)') { $protocol = $Matches[1] }
 }
 if ([string]::IsNullOrEmpty($version)) { Write-Host 'fdbcli --version reported no version' -ForegroundColor Red; exit 1 }
-$dllHash = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLowerInvariant()
-$cliHash = (Get-FileHash -Algorithm SHA256 $cli).Hash.ToLowerInvariant()
+function Get-Sha([string] $Path) { return (Get-FileHash -Algorithm SHA256 $Path).Hash.ToLowerInvariant() }
+function Get-Line([string] $Name) {
+    $path = Join-Path $ArtifactDir $Name
+    if (Test-Path $path) { return "  - ``$Name``: SHA256 ``$(Get-Sha $path)``" }
+    return "  - ``$Name``: SHA256 <not fetched yet: run fetch-macos-client.ps1 -Tag $version>"
+}
 
 $info = @{}
 $infoPath = Join-Path $ArtifactDir 'build-info.txt'
@@ -41,21 +44,24 @@ if ($info['clang']) { $toolchain += ($info['clang'] -replace '^clang version ', 
 if ($info['cmake']) { $toolchain += ($info['cmake'] -replace '^cmake version ', 'CMake ') }
 $toolchain += 'Boost 1.86.0'
 $patchLine = if ($info['patch']) { "patch set ``$($info['patch'])``" } else { 'the patch set of this repository' }
-$dylibLine = if ($DylibSha256) { "``$($DylibSha256.ToLowerInvariant())``" } else { '<SHA256 of the macOS build, fill in when uploaded>' }
-$macCliLine = if ($MacCliSha256) { "``$($MacCliSha256.ToLowerInvariant())``" } else { '<SHA256 of the macOS build, fill in when uploaded>' }
 
 $body = @(
     "Windows and macOS Client Binaries for FoundationDB $version",
     '',
     '- Windows x86_64:',
-    "  - ``fdb_c.dll``, SHA256 ``$dllHash``",
-    "  - ``fdbcli.exe``, SHA256 ``$cliHash``",
+    "  - ``fdb_c.dll``, SHA256 ``$(Get-Sha $dll)``",
+    "  - ``fdbcli.exe``, SHA256 ``$(Get-Sha $cli)``",
     '',
     '- macOS arm64:',
-    "  - ``libfdb_c.dylib``: SHA256 $dylibLine",
-    "  - ``fdbcli``: SHA256 $macCliLine",
+    (Get-Line 'libfdb_c.arm64.dylib'),
+    (Get-Line 'fdbcli.arm64'),
     '',
-    "Windows build: upstream tag ``$version`` (commit ``$source``), protocol ``$protocol``, $($toolchain -join ', '), $patchLine. The Windows client library is built without TLS support and without AVX instructions."
+    '- macOS x86_64:',
+    (Get-Line 'libfdb_c.x86_64.dylib'),
+    (Get-Line 'fdbcli.x86_64'),
+    '',
+    "Windows build: upstream tag ``$version`` (commit ``$source``), protocol ``$protocol``, $($toolchain -join ', '), $patchLine. The Windows client library is built without TLS support and without AVX instructions.",
+    "macOS files: the unmodified client payloads of the upstream ``FoundationDB-${version}_arm64.pkg`` and ``FoundationDB-${version}_x86_64.pkg``, renamed with their architecture."
 ) -join "`n"
 [System.IO.File]::WriteAllText($OutFile, $body + "`n", [System.Text.Encoding]::UTF8)
 Write-Host $body
