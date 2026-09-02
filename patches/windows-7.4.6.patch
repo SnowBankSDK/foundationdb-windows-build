@@ -1,0 +1,409 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f4480d703..10014917d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -23,11 +23,52 @@ if(POLICY CMP0135)
+   cmake_policy(SET CMP0135 NEW)
+ endif()
+ 
+-project(foundationdb
+-  VERSION 7.4.6
+-  DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
+-  HOMEPAGE_URL "http://www.foundationdb.org/"
+-  LANGUAGES C CXX ASM Swift)
++if (NOT WIN32)
++	project(foundationdb
++	  VERSION 7.4.6
++	  DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
++	  HOMEPAGE_URL "http://www.foundationdb.org/"
++	  LANGUAGES C CXX ASM Swift)
++else()
++	project(foundationdb
++	  VERSION 7.4.6
++	  DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
++	  HOMEPAGE_URL "http://www.foundationdb.org/"
++	  LANGUAGES C CXX ASM)
++endif()
++
++
++### HACKHACK FOR WIN32
++if(WIN32)
++	set(BOOST_ROOT "C:/boost_1_86_0")
++	set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
++	set(Boost_USE_STATIC_LIBS ON)
++	set(Boost_USE_MULTITHREADED ON)
++	set(Boost_USE_STATIC_RUNTIME ON)
++	set(BUILD_C_BINDING ON)
++	
++	cmake_policy(SET CMP0167 OLD)
++	
++	set(WITH_SWIFT OFF CACHE BOOL "Disable Swift on Windows")
++	set(CMAKE_Swift_COMPILER "" CACHE FILEPATH "Disable Swift compiler")
++	set(FOUNDATIONDB_CROSS_COMPILING OFF CACHE BOOL "Force cross-compiling to skip Swift targets")
++
++	set(OPEN_FOR_IDE OFF CACHE BOOL "Build from command line only on Windows")
++	
++	# simplify build
++	set(BUILD_DOCUMENTATION OFF CACHE BOOL "Don't build Sphinx Documentation on Windows")
++	set(BUILD_AWS_BACKUP OFF CACHE BOOL "No AWS backup support on Windows")
++	set(WITH_GRPC OFF CACHE BOOL "No gRPC support on Windows")
++	set(USE_VALGRIND OFF CACHE BOOL "No Valgrind")
++	set(BUILD_PYTHON_BINDING OFF CACHE BOOL "Do not build Python binding on Windows")
++	set(BUILD_JAVA_BINDING	OFF CACHE BOOL "Do not build JAVA binding on Windows")
++	set(BUILD_GO_BINDING OFF CACHE BOOL "Do not build Go binding on Windows")
++	set(BUILD_RUBY_BINDING OFF CACHE BOOL "Do not build Ruby binding on Windows")
++	set(WITH_ROCKSDB OFF CACHE BOOL "Disable RocksDB on Windows")
++	set(WITH_ACAC OFF CACHE BOOL "Disable ACAC on Windows")
++	set(NO_MULTIREGION_TEST ON CACHE BOOL "Disable Multi-Region Test on Windows")
++endif()
++###
+ 
+ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+ 
+@@ -181,8 +222,10 @@ configure_file(fdb.cluster.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdb.cluster)
+ ################################################################################
+ # testing
+ ################################################################################
+-include(CTest)
+-enable_testing()
++if (NOT WIN32)
++	include(CTest)
++	enable_testing()
++endif()
+ 
+ ################################################################################
+ # Directory structure
+@@ -223,7 +266,9 @@ else()
+ endif()
+ add_subdirectory(fdbbackup)
+ add_subdirectory(metacluster)
+-add_subdirectory(tests)
++if (NOT WIN32)
++  add_subdirectory(tests)
++endif()
+ if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+   add_subdirectory(flowbench EXCLUDE_FROM_ALL)
+ endif()
+@@ -233,14 +278,14 @@ if(WITH_PYTHON AND WITH_C_BINDING)
+   endif()
+ endif()
+ if(WITH_DOCUMENTATION)
+-  add_subdirectory(documentation)
+-  if(BUILD_JAVA_BINDING)
+-    add_dependencies(html CopyJavadoc)
+-  endif()
++  # add_subdirectory(documentation)
++  # if(BUILD_JAVA_BINDING)
++    # add_dependencies(html CopyJavadoc)
++  # endif()
+ endif()
+ 
+ if(WIN32)
+-  add_subdirectory(packaging/msi)
++  #add_subdirectory(packaging/msi)
+ else()
+   include(CPack)
+ endif()
+diff --git a/cmake/CompileActorCompiler.cmake b/cmake/CompileActorCompiler.cmake
+index 992e80f46..c2dcbef04 100644
+--- a/cmake/CompileActorCompiler.cmake
++++ b/cmake/CompileActorCompiler.cmake
+@@ -5,16 +5,32 @@ set(ACTORCOMPILER_SRCS
+   ${CMAKE_CURRENT_SOURCE_DIR}/flow/actorcompiler/Program.cs
+   ${CMAKE_CURRENT_SOURCE_DIR}/flow/actorcompiler/Properties/AssemblyInfo.cs)
+ if(WIN32)
+-  add_executable(actorcompiler ${ACTORCOMPILER_SRCS})
+-  target_compile_options(actorcompiler PRIVATE "/langversion:6")
+-  set_property(TARGET actorcompiler PROPERTY VS_DOTNET_REFERENCES
+-    "System"
+-    "System.Core"
+-    "System.Xml.Linq"
+-    "System.Data.DataSetExtensions"
+-    "Microsoft.CSharp"
+-    "System.Data"
+-    "System.Xml")
++
++	# Paths
++	set(actorcompiler_proj "${CMAKE_SOURCE_DIR}/flow/actorcompiler/actorcompiler.csproj")
++	set(actor_out "${CMAKE_CURRENT_BINARY_DIR}/actorcompiler.exe")
++
++	# Custom command to build actorcompiler
++	add_custom_command(
++	  OUTPUT "${actor_out}"
++	  COMMAND dotnet build "${actorcompiler_proj}" -c Release -nologo -o "${CMAKE_CURRENT_BINARY_DIR}"
++	  BYPRODUCTS "${actor_out}"
++	  DEPENDS "${actorcompiler_proj}" ${ACTORCOMPILER_SRCS}
++	  COMMENT "Compile actor compiler"
++	  VERBATIM
++	)
++
++	# Custom target that builds actorcompiler
++	add_custom_target(actorcompiler_build DEPENDS "${actor_out}")
++
++	# Imported executable target
++	add_executable(actorcompiler IMPORTED GLOBAL)
++	set_target_properties(actorcompiler PROPERTIES IMPORTED_LOCATION "${actor_out}")
++	#add_dependencies(actorcompiler actorcompiler_build)
++
++	# Optional: expose path
++	set(actor_exe "$<TARGET_FILE:actorcompiler>")
++
+ else()
+   set(ACTOR_COMPILER_REFERENCES
+     "-r:System,System.Core,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml")
+diff --git a/fdbclient/CMakeLists.txt b/fdbclient/CMakeLists.txt
+index 2c99f05d1..1d2eb2301 100644
+--- a/fdbclient/CMakeLists.txt
++++ b/fdbclient/CMakeLists.txt
+@@ -103,7 +103,7 @@ target_link_libraries(s3client PRIVATE
+     boost_target_program_options
+ )
+ 
+-if(UNIX AND NOT APPLE)
++if(UNIX AND NOT APPLE AND NOT WIN32)
+     target_link_libraries(s3client PRIVATE folly_memcpy)
+ endif()
+ 
+diff --git a/fdbclient/S3Client_cli.actor.cpp b/fdbclient/S3Client_cli.actor.cpp
+index 386585a66..425e1b5e2 100644
+--- a/fdbclient/S3Client_cli.actor.cpp
++++ b/fdbclient/S3Client_cli.actor.cpp
+@@ -38,7 +38,7 @@
+ #include <boost/algorithm/hex.hpp>
+ #include "fdbclient/BuildFlags.h"
+ #include "fdbclient/BackupContainerFileSystem.h"
+-#import "fdbclient/BackupTLSConfig.h"
++#include "fdbclient/BackupTLSConfig.h"
+ #include "fdbclient/FDBTypes.h"
+ #include "fdbclient/IKnobCollection.h"
+ #include "fdbclient/Knobs.h"
+diff --git a/fdbclient/include/fdbclient/RandomKeyValueUtils.h b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
+index a7bc2554c..a6f1f3ba4 100644
+--- a/fdbclient/include/fdbclient/RandomKeyValueUtils.h
++++ b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
+@@ -223,7 +223,7 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
+ 		int inserts = 0;
+ 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
+ 		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
+-		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
++		const unsigned int maxInsertTry = 3 * indexGenerator.max + (((sizeof(unsigned int) * 8) - clz(indexGenerator.max)) * 100);
+ 		while (uniqueKeys.size() < indexGenerator.max) {
+ 			auto k = keyGen.next();
+ 			uniqueKeys.insert(k);
+diff --git a/fdbrpc/ActorFuzzUnitTest.cpp b/fdbrpc/ActorFuzzUnitTest.cpp
+index a9464be17..fef9dda07 100644
+--- a/fdbrpc/ActorFuzzUnitTest.cpp
++++ b/fdbrpc/ActorFuzzUnitTest.cpp
+@@ -24,8 +24,12 @@
+ // Only used to link unit tests
+ void forceLinkActorFuzzUnitTests() {}
+ 
++#if !_WIN32
++
+ TEST_CASE("/actorFuzz") {
+ 	std::pair<int, int> result = actorFuzzTests();
+ 	ASSERT(result.first == result.second);
+ 	return Void();
+-}
+\ No newline at end of file
++}
++
++#endif
+\ No newline at end of file
+diff --git a/fdbserver/VFSAsync.cpp b/fdbserver/VFSAsync.cpp
+index 34e80933a..707e813bd 100644
+--- a/fdbserver/VFSAsync.cpp
++++ b/fdbserver/VFSAsync.cpp
+@@ -436,7 +436,7 @@ static int asyncShmLock(sqlite3_file* fd, /* Database file holding the shared me
+ ** any load or store begun after the barrier.
+ */
+ static void asyncShmBarrier(sqlite3_file*) {
+-#if WIN32
++#if _WIN32
+ 	_ReadWriteBarrier();
+ #else
+ 	__sync_synchronize();
+diff --git a/flow/CMakeLists.txt b/flow/CMakeLists.txt
+index 16cb78b58..549c31461 100644
+--- a/flow/CMakeLists.txt
++++ b/flow/CMakeLists.txt
+@@ -21,6 +21,13 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+     list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
+ endif()
+ 
++###HACHACK: debug the contents of the source files
++message(STATUS "FLOW_SRCS contains:")
++foreach(src IN LISTS FLOW_SRCS)
++  message(STATUS "  ${src}")
++endforeach()
++###/HACKHACK
++
+ make_directory(${CMAKE_CURRENT_BINARY_DIR}/include/flow)
+ 
+ set(FDB_API_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ApiVersions.cmake" CACHE STRING "Api version cmake file." FORCE)
+@@ -269,3 +276,8 @@ if (WITH_SWIFT)
+     add_dependencies(flow_sampling flow_swift)
+ endif() # WITH SWIFT
+ 
++if (WIN32)
++    list(APPEND FLOW_SRCS ${CMAKE_CURRENT_BINARY_DIR}/TLSConfig.actor.g.cpp)
++    message(STATUS "Added TLSConfig.actor.g.cpp")
++    add_dependencies(flow actorcompiler_build)
++endif()
+diff --git a/flow/Hash3.c b/flow/Hash3.c
+index fc3d26ef1..73735e36c 100644
+--- a/flow/Hash3.c
++++ b/flow/Hash3.c
+@@ -43,7 +43,7 @@ on 1 byte), but shoehorning those bytes into integers efficiently is messy.
+  * My best guess at if you are big-endian or little-endian.  This may
+  * need adjustment.
+  */
+-#ifdef WIN32
++#ifdef _WIN32
+ #define HASH_LITTLE_ENDIAN 1
+ #define HASH_BIG_ENDIAN 0
+ #else
+diff --git a/flow/Net2.actor.cpp b/flow/Net2.actor.cpp
+index 67e8fce27..deb2c5175 100644
+--- a/flow/Net2.actor.cpp
++++ b/flow/Net2.actor.cpp
+@@ -1417,11 +1417,14 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
+ 	updateNow();
+ }
+ 
++#if _WIN32
++#else
+ ACTOR static Future<Void> reloadCertificatesOnChange(
+     TLSConfig config,
+     std::function<void()> onPolicyFailure,
+     AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar,
+     Reference<TLSPolicy>* policy) {
++
+ 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
+ 		return Void();
+ 	}
+@@ -1464,8 +1467,12 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
+ 		}
+ 	}
+ }
++#endif
+ 
+ void Net2::initTLS(ETLSInitState targetState) {
++#if _WIN32
++	return;
++#else
+ 	if (tlsInitializedState >= targetState) {
+ 		return;
+ 	}
+@@ -1528,6 +1535,7 @@ void Net2::initTLS(ETLSInitState targetState) {
+ 	}
+ 
+ 	tlsInitializedState = targetState;
++#endif
+ }
+ 
+ ACTOR Future<Void> Net2::logTimeOffset() {
+diff --git a/flow/Trace.cpp b/flow/Trace.cpp
+index 149ae9ca6..cc0842a28 100644
+--- a/flow/Trace.cpp
++++ b/flow/Trace.cpp
+@@ -47,6 +47,7 @@
+ 
+ #ifdef _WIN32
+ #include <windows.h>
++#include <chrono>
+ #undef max
+ #undef min
+ #endif
+diff --git a/flow/actorcompiler/Properties/AssemblyInfo.cs b/flow/actorcompiler/Properties/AssemblyInfo.cs
+index 7e837048b..843c9e519 100644
+--- a/flow/actorcompiler/Properties/AssemblyInfo.cs
++++ b/flow/actorcompiler/Properties/AssemblyInfo.cs
+@@ -25,14 +25,14 @@ using System.Runtime.InteropServices;
+ // General Information about an assembly is controlled through the following 
+ // set of attributes. Change these attribute values to modify the information
+ // associated with an assembly.
+-[assembly: AssemblyTitle("actorcompiler")]
+-[assembly: AssemblyDescription("Compile Flow code to C++")]
+-[assembly: AssemblyConfiguration("")]
+-[assembly: AssemblyCompany("Apple Inc")]
+-[assembly: AssemblyProduct("actorcompiler")]
+-[assembly: AssemblyCopyright("Copyright (c) 2013-2017 Apple Inc.")]
+-[assembly: AssemblyTrademark("")]
+-[assembly: AssemblyCulture("")]
++// [assembly: AssemblyTitle("actorcompiler")]
++// [assembly: AssemblyDescription("Compile Flow code to C++")]
++// [assembly: AssemblyConfiguration("")]
++// [assembly: AssemblyCompany("Apple Inc")]
++// [assembly: AssemblyProduct("actorcompiler")]
++// [assembly: AssemblyCopyright("Copyright (c) 2013-2017 Apple Inc.")]
++// [assembly: AssemblyTrademark("")]
++// [assembly: AssemblyCulture("")]
+ 
+ // Setting ComVisible to false makes the types in this assembly not visible 
+ // to COM components.  If you need to access a type in this assembly from 
+@@ -52,5 +52,5 @@ using System.Runtime.InteropServices;
+ // You can specify all the values or you can default the Build and Revision Numbers 
+ // by using the '*' as shown below:
+ // [assembly: AssemblyVersion("1.0.*")]
+-[assembly: AssemblyVersion("1.0.0.0")]
+-[assembly: AssemblyFileVersion("1.0.0.0")]
++// [assembly: AssemblyVersion("1.0.0.0")]
++// [assembly: AssemblyFileVersion("1.0.0.0")]
+diff --git a/flow/include/flow/flat_buffers.h b/flow/include/flow/flat_buffers.h
+index 8203d17ca..20c3e88e0 100644
+--- a/flow/include/flow/flat_buffers.h
++++ b/flow/include/flow/flat_buffers.h
+@@ -41,6 +41,9 @@
+ #include "flow/FileIdentifier.h"
+ #include "flow/ObjectSerializerTraits.h"
+ 
++//WIN32:
++#include <stdexcept>
++
+ template <class T = pack<>, class...>
+ struct concat {
+ 	using type = T;
+diff --git a/flow/include/flow/flow.h b/flow/include/flow/flow.h
+index f6a6e0f59..92f6873fc 100644
+--- a/flow/include/flow/flow.h
++++ b/flow/include/flow/flow.h
+@@ -71,7 +71,11 @@
+ #pragma clang diagnostic ignored "-Wnullability-completeness"
+ #endif /* WITH_SWIFT */
+ 
+-#include "pthread.h"
++#ifdef _WIN32
++	#include <windows.h>
++#else
++	#include "pthread.h"
++#endif
+ 
+ #include <boost/version.hpp>
+ 
+diff --git a/flow/include/flow/swift.h b/flow/include/flow/swift.h
+index 2c71b4854..fd2388d55 100644
+--- a/flow/include/flow/swift.h
++++ b/flow/include/flow/swift.h
+@@ -32,9 +32,18 @@
+ 
+ // ==== ----------------------------------------------------------------------------------------------------------------
+ 
+-inline pthread_t _tid() {
+-	return pthread_self();
+-}
++
++#ifdef _WIN32
++	#include <windows.h>
++	inline DWORD _tid() {
++		return GetCurrentThreadId();
++	}
++#else
++	#include <pthread.h>
++	inline pthread_t _tid() {
++		return pthread_self();
++	}
++#endif
+ 
+ // ==== ----------------------------------------------------------------------------------------------------------------
+ 

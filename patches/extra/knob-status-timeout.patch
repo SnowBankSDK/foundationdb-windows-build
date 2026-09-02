@@ -1,0 +1,16 @@
+diff --git a/fdbclient/include/fdbclient/ClientKnobs.h b/fdbclient/include/fdbclient/ClientKnobs.h
+index afb0d57e04..71dc4afdc7 100644
+--- a/fdbclient/include/fdbclient/ClientKnobs.h
++++ b/fdbclient/include/fdbclient/ClientKnobs.h
+@@ -26,6 +26,11 @@
+ #include "flow/Knobs.h"
+ #include "flow/flow.h"
+ 
++#ifdef _WIN32
++// winnt.h defines STATUS_TIMEOUT as an NTSTATUS macro; the client knob below has the same name.
++#undef STATUS_TIMEOUT
++#endif
++
+ FDB_BOOLEAN_PARAM(Randomize);
+ FDB_BOOLEAN_PARAM(IsSimulated);
+ 

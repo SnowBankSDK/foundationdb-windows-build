@@ -1,0 +1,8 @@
+{
+  "name": "foundationdb-deps",
+  "version": "7.4.6",
+  "dependencies": [
+    "zlib", "lz4"
+  ],
+  "builtin-baseline": "728711b66ff08483628a5f314ac65980930a52be"
+}
