@@ -8,10 +8,10 @@ no Docker and no Linux.
 Follow this file top to bottom. Every step is a script under `scripts\`; run them from the repository
 root in Windows PowerShell 5.1 or PowerShell 7. Nothing here needs administrator rights.
 
-## Two lines
+## Two branches
 
 Application developers pick the 7.3.x or the 7.4.x client package to match their cluster, so both
-lines get a Windows build for every upstream release, on the same recipe (the 7.3 patch set differs,
+branches get a Windows build for every upstream release, on the same recipe (the 7.3 patch set differs,
 `patches\README.md`). Two rules decide which upstream tag to build:
 
 - **7.3 ships twins.** Every 7.3 release comes as an even (non-AVX) and an odd (AVX) tag of the same
@@ -114,7 +114,7 @@ What the script does, in order, with a timestamped `=== phase ===` line for each
    source root and, when `-BoostRoot` is not the default, rewrites the `BOOST_ROOT` line the patch sets.
 4. Configures with CMake: generator `Visual Studio 17 2022`, platform `x64`, toolset `ClangCL`, the
    vcpkg toolchain file (vcpkg builds zlib 1.3.1 and lz4 1.10.0 from the manifest at this step), C++20,
-   `CMAKE_BUILD_TYPE=Release`. The 7.3 line adds `/DWIN32 /D_WINDOWS` to `CMAKE_CXX_FLAGS`.
+   `CMAKE_BUILD_TYPE=Release`. The 7.3 branch adds `/DWIN32 /D_WINDOWS` to `CMAKE_CXX_FLAGS`.
 5. Builds the actor compiler with `dotnet build` into `build\` (the CMake target that should do it never
    runs under MSBuild).
 6. Builds the `fdb_c` and `fdbcli` targets.
@@ -132,9 +132,9 @@ The script stops at the first failure with `BUILD FAILED: <reason>` in the log a
 
 "Verified" means all four gates pass:
 
-1. `fdbcli --version` reports the tag (`v7.4.7`) and the protocol of the release line
+1. `fdbcli --version` reports the tag (`v7.4.7`) and the protocol of the release branch
    (`fdb00b074000000` for 7.4, `fdb00b073000000` for 7.3).
-2. The export set of `fdb_c.dll` (from `dumpbin /exports`) equals `reference\exports-<line>.txt`: 111
+2. The export set of `fdb_c.dll` (from `dumpbin /exports`) equals `reference\exports-<branch>.txt`: 111
    names, all `fdb_*`, nothing added, nothing removed. A new upstream API adds names; when that is the
    intent, update the reference file in the same change.
 3. Each `.sha256` file matches its artifact.
@@ -274,9 +274,9 @@ scripts\verify-fdb.ps1         exports, version, checksums, live-cluster smoke t
 scripts\fetch-macos-client.ps1 the macOS clients (arm64 and x86_64) out of the upstream packages, via 7-Zip
 scripts\release-body.ps1       the GitHub release body rendered from the artifacts
 scripts\release-manifest.ps1   release and asset check through gh, hash comparison, manifest-snippet.json
-patches\windows-7.3.52.patch   the 7.3 line patch set (8 files)
+patches\windows-7.3.52.patch   the 7.3 branch patch set (8 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
-patches\windows-7.4.7.patch    the 7.4 line patch set (16 files), the one build-fdb.ps1 applies
+patches\windows-7.4.7.patch    the 7.4 branch patch set (16 files), the one build-fdb.ps1 applies
 patches\extra\*.patch          fixes tried on every tag and applied when they fit
 patches\vcpkg.json             the vcpkg manifest (zlib, lz4, pinned baseline)
 patches\README.md              what each hunk group does and how to port the set to a new tag

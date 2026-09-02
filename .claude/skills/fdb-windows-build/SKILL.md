@@ -33,7 +33,7 @@ Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one bui
    ```
 
 3. Build. Detached, so a lost session does not kill it; follow the log. About six minutes on a 32-thread
-   host for the 7.4 line (configure 67 s, `fdb_c` about 4 min, `fdbcli` 68 s).
+   host for the 7.4 branch (configure 67 s, `fdb_c` about 4 min, `fdbcli` 68 s).
 
    ```powershell
    Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','.\scripts\build-fdb.ps1','-Tag','7.4.7' -WindowStyle Hidden
@@ -53,9 +53,9 @@ Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one bui
 
 ## Verification gates
 
-1. `fdbcli --version` reports the tag and the protocol of its line (`fdb00b074000000` for 7.4,
+1. `fdbcli --version` reports the tag and the protocol of its branch (`fdb00b074000000` for 7.4,
    `fdb00b073000000` for 7.3).
-2. The export set of `fdb_c.dll` equals `reference\exports-<line>.txt` (111 `fdb_*` names).
+2. The export set of `fdb_c.dll` equals `reference\exports-<branch>.txt` (111 `fdb_*` names).
 3. Every `.sha256` file matches its binary.
 4. The new `fdbcli.exe` creates a database on a `foundationdb/foundationdb:<tag>` container, `status
    minimal` reports it available, and a set/get round trip commits.
