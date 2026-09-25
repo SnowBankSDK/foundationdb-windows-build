@@ -108,8 +108,8 @@ What the script does, in order, with a timestamped `=== phase ===` line for each
 1. Enters the Visual Studio developer environment (clang-cl, lld-link, MSBuild, the Windows SDK) and
    points `VCPKG_ROOT` at the vcpkg bundled with Visual Studio.
 2. Clones `apple/foundationdb` and checks out the tag. It refuses a checkout with local changes.
-3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.7.patch`
-   for a 7.4 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag. It then
+3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.8.patch`
+   for 7.4.8 and later, `patches\windows-7.4.7.patch` for earlier 7.4 tags, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag. It then
    tries every `patches\extra\*.patch` and applies the ones that fit. It copies `patches\vcpkg.json` to the
    source root and, when `-BoostRoot` is not the default, rewrites the `BOOST_ROOT` line the patch sets.
 4. Configures with CMake: generator `Visual Studio 17 2022`, platform `x64`, toolset `ClangCL`, the
@@ -276,7 +276,8 @@ scripts\release-body.ps1       the GitHub release body rendered from the artifac
 scripts\release-manifest.ps1   release and asset check through gh, hash comparison, manifest-snippet.json
 patches\windows-7.3.52.patch   the 7.3 branch patch set (8 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
-patches\windows-7.4.7.patch    the 7.4 branch patch set (16 files), the one build-fdb.ps1 applies
+patches\windows-7.4.7.patch    the 7.4 patch set up to 7.4.7 (16 files)
+patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (16 files)
 patches\extra\*.patch          fixes tried on every tag and applied when they fit
 patches\vcpkg.json             the vcpkg manifest (zlib, lz4, pinned baseline)
 patches\README.md              what each hunk group does and how to port the set to a new tag

@@ -7,12 +7,25 @@ and stub TLS. `scripts\build-fdb.ps1` applies one branch patch by release line, 
 
 | File | Applies to | Files touched |
 |---|---|---|
-| `windows-7.4.7.patch` | every 7.4 tag (the script rewrites the `VERSION` context to the tag) | 16 |
+| `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 16 |
+| `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag) | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
 | `windows-7.3.52.patch` | every 7.3 tag | 8 |
 | `extra\knob-status-timeout-header.patch` | tags whose `ClientKnobs.h` still lacks the `#undef` (7.3.78 and later 7.3 tags) | 1 |
 | `extra\knob-status-timeout-source.patch` | tags where `windows.h` is included after the knob header in the two client sources that use the knob (7.3.78 and later 7.3 tags; harmless on 7.4) | 2 |
 | `vcpkg.json` | copied to the source root of every tag | manifest |
+
+## The 7.4.8 port
+
+Upstream 7.4.8 changed two things the 7.4.7 patch relied on, and `windows-7.4.8.patch` follows them:
+
+- `project(...)` no longer declares Swift; upstream enables it only under `if(WITH_SWIFT)`. The patch
+  keeps the upstream `project(...)` call and inserts the `WIN32` block before that test, so
+  `WITH_SWIFT OFF` is set before it is read. The patch has no `VERSION` line anymore.
+- `cmake/CompileBoost.cmake` finds Boost in config mode on Windows. The `WIN32` block adds
+  `${BOOST_ROOT}/stage` to `CMAKE_PREFIX_PATH`, where `b2 stage` writes `lib/cmake/Boost-1.86.0`.
+
+The other 15 files carry the 7.4.7 hunks unchanged. The description below covers both patches.
 
 ## The 7.4 patch, hunk by hunk
 
@@ -21,8 +34,8 @@ Build system, all essential:
 - `CMakeLists.txt`. Splits `project(...)` so Windows declares `LANGUAGES C CXX ASM` without Swift (7.4
   added Swift as a project language and there is no Swift toolchain on Windows). A `WIN32` block points
   Boost at `C:/boost_1_86_0` (`BOOST_ROOT`, `BOOST_LIBRARYDIR`, static, multithreaded, static runtime),
-  forces `BUILD_C_BINDING ON`, sets `cmake_policy(CMP0167 OLD)` for module-mode FindBoost (the
-  hand-built Boost has no CMake config package), disables Swift (`WITH_SWIFT OFF`, an empty
+  forces `BUILD_C_BINDING ON`, sets `cmake_policy(CMP0167 OLD)` for module-mode FindBoost (up to
+  7.4.7; from 7.4.8 upstream uses config mode and the block adds the stage to `CMAKE_PREFIX_PATH`), disables Swift (`WITH_SWIFT OFF`, an empty
   `CMAKE_Swift_COMPILER`, `FOUNDATIONDB_CROSS_COMPILING OFF`), sets `OPEN_FOR_IDE OFF`, and turns off the
   components the Windows client does not need: documentation, AWS backup, gRPC, Valgrind, RocksDB, ACAC,
   the Python, Java, Go and Ruby bindings, the multi-region tests. It guards `include(CTest)`,

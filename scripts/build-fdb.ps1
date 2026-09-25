@@ -92,7 +92,11 @@ try {
     # Patch and flags by release line.
     switch ($line) {
         '7.3' { $patchName = 'windows-7.3.52.patch'; $cxxFlags = '/DWIN32 /D_WINDOWS /Zc:__cplusplus' }
-        '7.4' { $patchName = 'windows-7.4.7.patch'; $cxxFlags = '/Zc:__cplusplus' }
+        '7.4' {
+            # 7.4.8 made Swift optional and moved the Windows Boost lookup to config mode, so the 7.4.7 patch stops fitting there.
+            $patchName = if ($version -ge [version]'7.4.8') { 'windows-7.4.8.patch' } else { 'windows-7.4.7.patch' }
+            $cxxFlags = '/Zc:__cplusplus'
+        }
         default { Stop-Build "no patch for release line $line (patches\ covers 7.3 and 7.4)" }
     }
     $patchPath = Join-Path $repo "patches\$patchName"
