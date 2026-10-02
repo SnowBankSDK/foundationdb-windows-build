@@ -14,8 +14,8 @@ upstream tag it was built from and carries `fdb_c.dll`, `fdbcli.exe`, `libfdb_c.
 7.4.4 carry the macOS arm64 files without the architecture suffix). The `FoundationDB.Client.Native`
 NuGet package downloads these files by URL and verifies the checksums.
 
-The 7.3 and 7.4 Windows `fdb_c.dll` is built without TLS support (the TLS initialization is stubbed out);
-from 8.0 on, the Windows client supports TLS. Every build is without AVX instructions; it runs on any
+The Windows `fdb_c.dll` supports TLS from 8.0.0 on, and in 7.3 and 7.4 releases built after
+October 2026; earlier releases stub it out. Every build is without AVX instructions; it runs on any
 x64 Windows host. It speaks the wire protocol of its release branch (`fdb00b074000000` for 7.4,
 `fdb00b080000000` for 8.0), so a 7.4.x client talks to any 7.4.x cluster. From 8.0 on, each binary
 carries a Windows version resource (file version, product version with the source commit).

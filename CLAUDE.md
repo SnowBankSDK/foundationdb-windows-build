@@ -306,10 +306,10 @@ scripts\verify-fdb.ps1         exports, version, checksums, live-cluster smoke t
 scripts\fetch-macos-client.ps1 the macOS clients (arm64 and x86_64) out of the upstream packages, via 7-Zip
 scripts\release-body.ps1       the GitHub release body rendered from the artifacts
 scripts\release-manifest.ps1   release and asset check through gh, hash comparison, manifest-snippet.json
-patches\windows-7.3.52.patch   the 7.3 branch patch set (8 files)
+patches\windows-7.3.52.patch   the 7.3 branch patch set (13 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
 patches\windows-7.4.7.patch    the 7.4 patch set up to 7.4.7 (16 files)
-patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (16 files)
+patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (21 files)
 patches\windows-8.0.0.patch    the 8.0 patch set, Windows-only hunks (28 files, one new: cmake\WindowsVersionInfo.rc.in)
 patches\windows-8.0.0-common.patch  the 8.0 hunks that change code shared with Linux and macOS (2 files)
 patches\extra\*.patch          fixes tried on every tag and applied when they fit
