@@ -103,7 +103,12 @@ try {
             $patchName = if ($version -ge [version]'7.4.8') { 'windows-7.4.8.patch' } else { 'windows-7.4.7.patch' }
             $cxxFlags = '/Zc:__cplusplus'
         }
-        '8.0' { $patchName = 'windows-8.0.0.patch'; $cxxFlags = '/Zc:__cplusplus' }
+        '8.0' {
+            $patchName = 'windows-8.0.0.patch'
+            # The IR verifier stops the build on a function that clang-cl compiled into invalid code: clang-cl
+            # 23 does that to some coroutines with exception handling, and the result crashes at run time.
+            $cxxFlags = '/Zc:__cplusplus /clang:-fverify-intermediate-code'
+        }
         default { Stop-Build "no patch for release line $line (patches\ covers 7.3, 7.4 and 8.0)" }
     }
     $patchPath = Join-Path $repo "patches\$patchName"
@@ -183,6 +188,18 @@ try {
         & git -C $SourceDir apply $tempPatch 2>&1 | ForEach-Object { Format-Line $_ } | Where-Object { $_ -notmatch 'whitespace' } | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { Stop-Build 'git apply failed after a clean check' }
         Write-Host "applied  : $patchName (VERSION rewritten to $Tag)"
+
+        # A branch patch touches only code that Linux and macOS do not compile. Hunks that must change
+        # shared code live in a companion "-common" patch, applied after it when the branch has one.
+        $commonName = [System.IO.Path]::GetFileNameWithoutExtension($patchName) + '-common.patch'
+        $commonPath = Join-Path $repo "patches\$commonName"
+        if (Test-Path $commonPath) {
+            & git -C $SourceDir apply --check $commonPath 2>&1 | ForEach-Object { Write-Host (Format-Line $_) }
+            if ($LASTEXITCODE -ne 0) { Stop-Build "the common patch $commonName does not apply to $Tag" }
+            & git -C $SourceDir apply $commonPath 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Stop-Build 'git apply of the common patch failed after a clean check' }
+            Write-Host "applied  : $commonName"
+        }
 
         foreach ($extra in @(Get-ChildItem (Join-Path $repo 'patches\extra') -Filter '*.patch' -ErrorAction SilentlyContinue | Sort-Object Name)) {
             & git -C $SourceDir apply --check $extra.FullName 2>&1 | Out-Null
@@ -265,7 +282,8 @@ try {
     $info += "clang: $clangVersion"
     $info += "cmake: $cmakeVersion"
     $info += "boost: $BoostRoot"
-    $info += "patch: $patchName"
+    $commonInfo = [System.IO.Path]::GetFileNameWithoutExtension($patchName) + '-common.patch'
+    $info += "patch: $patchName" + $(if (Test-Path (Join-Path $repo "patches\$commonInfo")) { " + $commonInfo" } else { '' })
     $info += "built: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') on $env:COMPUTERNAME ($env:NUMBER_OF_PROCESSORS threads)"
     foreach ($f in @($dll, $cli)) {
         $name = Split-Path -Leaf $f
