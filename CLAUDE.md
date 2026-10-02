@@ -121,7 +121,8 @@ What the script does, in order, with a timestamped `=== phase ===` line for each
 2. Clones `apple/foundationdb` and checks out the tag. It refuses a checkout with local changes.
 3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.8.patch`
    for 7.4.8 and later, `patches\windows-7.4.7.patch` for earlier 7.4 tags, `patches\windows-8.0.0.patch`
-   for an 8.0 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag. It then
+   for an 8.0 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag, then the
+   branch's `-common` companion when one exists (`patches\windows-8.0.0-common.patch`). It then
    tries every `patches\extra\*.patch` and applies the ones that fit. It copies `patches\vcpkg.json` to the
    source root and, when `-BoostRoot` is not the default, rewrites the `BOOST_ROOT` line the patch sets.
 4. Configures with CMake: generator `Visual Studio 17 2022`, platform `x64`, toolset `ClangCL`, the
@@ -226,6 +227,13 @@ release check) is a safe rehearsal.
 - **8.0 with clang 19: one compiler process grows past 40 GB on `fdbcli\fdbcli.cpp`.** Clang 19 cannot
   optimize the 1,100-line `cli()` coroutine at `/O1` or `/O2`. Clang 23 compiles the file at `/O2` in 13 s
   with 1.2 GB. Same fix as above: a standalone LLVM 22.1.7 or later.
+- **8.0: the build stops with `Broken function found, compilation aborted!` and `in function <name>`.**
+  The IR verifier (`/clang:-fverify-intermediate-code`, always on for 8.0) caught clang-cl building
+  invalid exception-handling code for a coroutine (LLVM issue 226735, open in 23.1.2). Shipping such code
+  crashes the client at run time: every failed connection did, in `connectionKeeper`. Wrap the named
+  function (or its class) in the same Windows-only `#pragma clang optimize off` / `on` block the 8.0
+  patch uses (`patches\README.md`, "clang-cl workaround"), rebuild with `-SkipClone`, and repeat until
+  the build passes; then save the patches.
 
 - **`actorcompiler.exe` missing, or every `.actor.cpp` fails to compile.** The CMake target
   `actorcompiler_build` never runs `dotnet build` under MSBuild. `build-fdb.ps1` builds the actor
@@ -302,7 +310,8 @@ patches\windows-7.3.52.patch   the 7.3 branch patch set (8 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
 patches\windows-7.4.7.patch    the 7.4 patch set up to 7.4.7 (16 files)
 patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (16 files)
-patches\windows-8.0.0.patch    the 8.0 patch set (16 files, one of them new: cmake\WindowsVersionInfo.rc.in)
+patches\windows-8.0.0.patch    the 8.0 patch set, Windows-only hunks (27 files, one new: cmake\WindowsVersionInfo.rc.in)
+patches\windows-8.0.0-common.patch  the 8.0 hunks that change code shared with Linux and macOS (2 files)
 patches\extra\*.patch          fixes tried on every tag and applied when they fit
 patches\vcpkg.json             the vcpkg manifest (zlib, lz4, pinned baseline)
 patches\README.md              what each hunk group does and how to port the set to a new tag
