@@ -1,9 +1,10 @@
 # Builds fdb_c.dll and fdbcli.exe for one upstream FoundationDB tag on Windows.
 #
-# Steps: clone apple/foundationdb at the tag, apply the branch patch from patches\ (7.3 or 7.4 by tag)
-# plus the extra patches that still apply, add vcpkg.json, configure with CMake (Visual Studio 2022,
-# ClangCL toolset, vcpkg manifest for zlib and lz4), build the actor compiler with dotnet, build the
-# fdb_c and fdbcli targets, copy the artifacts and write their .sha256 files.
+# Steps: clone apple/foundationdb at the tag, apply the branch patch from patches\ (7.3, 7.4 or 8.0 by
+# tag) plus the extra patches that still apply, add vcpkg.json, configure with CMake (Visual Studio 2022,
+# ClangCL toolset, vcpkg manifest for zlib and lz4), build the actor compiler with dotnet (7.3 and 7.4
+# only: 8.0 replaced the actors with C++20 coroutines), build the fdb_c and fdbcli targets, copy the
+# artifacts and write their .sha256 files.
 #
 # Usage (foreground):
 #   .\scripts\build-fdb.ps1 -Tag 7.4.7
@@ -12,7 +13,8 @@
 #   Get-Content C:\fdb-build\7.4.7\build-7.4.7.log -Wait
 #
 # Defaults: sources under C:\fdb-build\<Tag>\foundationdb, artifacts under <repo>\artifacts\<Tag>,
-# Boost at C:\boost_1_86_0, OpenSSL at C:\Program Files\OpenSSL-Win64, Visual Studio found by vswhere.
+# Boost at C:\boost_1_86_0 (7.3, 7.4) or C:\boost_1_89_0 (8.0), OpenSSL at C:\Program Files\OpenSSL-Win64,
+# Visual Studio found by vswhere, clang-cl from Visual Studio (7.3, 7.4) or C:\Program Files\LLVM (8.0).
 # Windows PowerShell 5.1 or PowerShell 7.
 [CmdletBinding()]
 param(
@@ -21,9 +23,10 @@ param(
     [string] $SourceDir = '',
     [string] $OutputDir = '',
     [string] $LogFile = '',
-    [string] $BoostRoot = 'C:\boost_1_86_0',
+    [string] $BoostRoot = '',
     [string] $OpenSslRoot = 'C:\Program Files\OpenSSL-Win64',
     [string] $VsPath = '',
+    [string] $LlvmRoot = '',
     [string] $Upstream = 'https://github.com/apple/foundationdb.git',
     [string] $ReferenceClone = '',
     [int] $Jobs = 0,
@@ -40,6 +43,9 @@ if ([string]::IsNullOrEmpty($SourceDir)) { $SourceDir = Join-Path $tagRoot 'foun
 if ([string]::IsNullOrEmpty($OutputDir)) { $OutputDir = Join-Path $repo "artifacts\$Tag" }
 if ([string]::IsNullOrEmpty($LogFile)) { $LogFile = Join-Path $tagRoot "build-$Tag.log" }
 $buildDir = Join-Path $SourceDir 'build'
+# The branch patch pins this Boost root in CMakeLists.txt; -BoostRoot rewrites it.
+$patchBoostRoot = if ($line -eq '8.0') { 'C:/boost_1_89_0' } else { 'C:/boost_1_86_0' }
+if ([string]::IsNullOrEmpty($BoostRoot)) { $BoostRoot = $patchBoostRoot.Replace('/', '\') }
 
 New-Item -ItemType Directory -Force -Path $tagRoot, $OutputDir | Out-Null
 Start-Transcript -Path $LogFile -Append | Out-Null
@@ -97,7 +103,8 @@ try {
             $patchName = if ($version -ge [version]'7.4.8') { 'windows-7.4.8.patch' } else { 'windows-7.4.7.patch' }
             $cxxFlags = '/Zc:__cplusplus'
         }
-        default { Stop-Build "no patch for release line $line (patches\ covers 7.3 and 7.4)" }
+        '8.0' { $patchName = 'windows-8.0.0.patch'; $cxxFlags = '/Zc:__cplusplus' }
+        default { Stop-Build "no patch for release line $line (patches\ covers 7.3, 7.4 and 8.0)" }
     }
     $patchPath = Join-Path $repo "patches\$patchName"
     if (-not (Test-Path $patchPath)) { Stop-Build "patch not found: $patchPath" }
@@ -113,7 +120,25 @@ try {
     Import-Module (Join-Path $VsPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
     Enter-VsDevShell -VsInstallPath $VsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
     $env:VCPKG_ROOT = Join-Path $VsPath 'VC\vcpkg'
-    $clangVersion = (& (Join-Path $VsPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe') --version | Select-Object -First 1)
+    # The 8.0 branch needs clang 22.1.7 or later: older clang-cl releases place the catch object of a
+    # try/catch inside a C++20 coroutine in the coroutine frame, and every handler then reads garbage.
+    # Visual Studio 2022 bundles clang 19, so the 8.0 branch uses a standalone LLVM install. MSBuild reads
+    # LLVMInstallDir and LLVMToolsVersion from the environment, which points the ClangCL toolset at it.
+    if ([string]::IsNullOrEmpty($LlvmRoot) -and $line -eq '8.0') { $LlvmRoot = 'C:\Program Files\LLVM' }
+    if ([string]::IsNullOrEmpty($LlvmRoot)) {
+        $clangCl = Join-Path $VsPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
+    } else {
+        $clangCl = Join-Path $LlvmRoot 'bin\clang-cl.exe'
+        if (-not (Test-Path $clangCl)) { Stop-Build "clang-cl not found at $clangCl (install LLVM 22.1.7 or later, or pass -LlvmRoot)" }
+    }
+    $clangVersion = (& $clangCl --version | Select-Object -First 1)
+    if ($clangVersion -notmatch 'clang version (\d+\.\d+\.\d+)') { Stop-Build "clang version not parsed: $clangVersion" }
+    $clangSemVer = [version] $Matches[1]
+    if ($line -eq '8.0' -and $clangSemVer -lt [version]'22.1.7') { Stop-Build "the 8.0 branch needs clang-cl 22.1.7 or later, found $clangSemVer at $clangCl" }
+    if (-not [string]::IsNullOrEmpty($LlvmRoot)) {
+        $env:LLVMInstallDir = $LlvmRoot
+        $env:LLVMToolsVersion = $clangSemVer.Major.ToString()
+    }
     $cmakeVersion = (& cmake --version | Select-Object -First 1)
     Write-Host "vs       : $VsPath"
     Write-Host "clang    : $clangVersion"
@@ -169,13 +194,14 @@ try {
             }
         }
 
-        # The branch patch pins Boost at C:/boost_1_86_0; point it at the requested root.
+        # Point the Boost root the branch patch pins at the requested root.
         $boostForward = ($BoostRoot -replace '\\', '/').TrimEnd('/')
-        if ($boostForward -ne 'C:/boost_1_86_0') {
+        if ($boostForward -ne $patchBoostRoot) {
             $cmakeLists = Join-Path $SourceDir 'CMakeLists.txt'
             $text = [System.IO.File]::ReadAllText($cmakeLists)
-            if ($text -notmatch [regex]::Escape('set(BOOST_ROOT "C:/boost_1_86_0")')) { Stop-Build 'BOOST_ROOT line not found in the patched CMakeLists.txt' }
-            [System.IO.File]::WriteAllText($cmakeLists, $text.Replace('set(BOOST_ROOT "C:/boost_1_86_0")', "set(BOOST_ROOT `"$boostForward`")"))
+            $pinned = "set(BOOST_ROOT `"$patchBoostRoot`")"
+            if ($text -notmatch [regex]::Escape($pinned)) { Stop-Build 'BOOST_ROOT line not found in the patched CMakeLists.txt' }
+            [System.IO.File]::WriteAllText($cmakeLists, $text.Replace($pinned, "set(BOOST_ROOT `"$boostForward`")"))
             Write-Host "boost    : BOOST_ROOT rewritten to $boostForward"
         }
         Copy-Item (Join-Path $repo 'patches\vcpkg.json') (Join-Path $SourceDir 'vcpkg.json') -Force
@@ -188,7 +214,10 @@ try {
     Set-Location $buildDir
     Write-Phase 'configure'
     $t = [System.Diagnostics.Stopwatch]::StartNew()
-    & cmake .. -G 'Visual Studio 17 2022' -A x64 -T ClangCL `
+    # 8.0 generates the option headers with its Python vexillographer, so C# leaves the build.
+    # 7.3 and 7.4 ignore the variable (CMake prints a "not used" warning).
+    $withCsharp = if ($line -eq '8.0') { 'OFF' } else { 'ON' }
+    & cmake .. -G 'Visual Studio 17 2022' -A x64 -T ClangCL "-DWITH_CSHARP=$withCsharp" `
         -DCMAKE_BUILD_TYPE=Release `
         -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
         -DVCPKG_TARGET_TRIPLET=x64-windows `
@@ -202,15 +231,17 @@ try {
 
     # The CMake actorcompiler_build target never runs dotnet under MSBuild, so the actor compiler is
     # built by hand into the build root, where every actor-compile rule expects build\actorcompiler.exe.
-    Write-Phase 'actor compiler (dotnet build)'
-    $t = [System.Diagnostics.Stopwatch]::StartNew()
-    # No node reuse and no shared compiler: Invoke-Logged waits for the process and its descendants, and the
-    # MSBuild worker nodes and VBCSCompiler that a dotnet build leaves behind for reuse would keep it waiting
-    # for their idle timeout (15 minutes) after the build itself has finished.
-    $rc = Invoke-Logged 'actorcompiler' 'dotnet' @('build', (Join-Path $SourceDir 'flow\actorcompiler\actorcompiler.csproj'), '-c', 'Release', '-nologo', '-v', 'q', '-nodeReuse:false', '-p:UseSharedCompilation=false', '-o', $buildDir) $buildDir
-    if ($rc -ne 0) { Stop-Build "actor compiler build failed ($rc)" }
-    if (-not (Test-Path (Join-Path $buildDir 'actorcompiler.exe'))) { Stop-Build 'actorcompiler.exe not produced' }
-    $timings['actorcompiler'] = $t.Elapsed
+    if ($line -ne '8.0') {
+        Write-Phase 'actor compiler (dotnet build)'
+        $t = [System.Diagnostics.Stopwatch]::StartNew()
+        # No node reuse and no shared compiler: Invoke-Logged waits for the process and its descendants, and the
+        # MSBuild worker nodes and VBCSCompiler that a dotnet build leaves behind for reuse would keep it waiting
+        # for their idle timeout (15 minutes) after the build itself has finished.
+        $rc = Invoke-Logged 'actorcompiler' 'dotnet' @('build', (Join-Path $SourceDir 'flow\actorcompiler\actorcompiler.csproj'), '-c', 'Release', '-nologo', '-v', 'q', '-nodeReuse:false', '-p:UseSharedCompilation=false', '-o', $buildDir) $buildDir
+        if ($rc -ne 0) { Stop-Build "actor compiler build failed ($rc)" }
+        if (-not (Test-Path (Join-Path $buildDir 'actorcompiler.exe'))) { Stop-Build 'actorcompiler.exe not produced' }
+        $timings['actorcompiler'] = $t.Elapsed
+    }
 
     # the same node-reuse rule for the MSBuild runs under cmake --build
     $buildExtra = @('--', '/nodeReuse:false')
