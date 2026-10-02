@@ -1,0 +1,364 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8324d10c31..dbe2a43f47 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,6 +29,56 @@ project(foundationdb
+   HOMEPAGE_URL "http://www.foundationdb.org/"
+   LANGUAGES C CXX ASM)
+ 
++### HACKHACK FOR WIN32
++if(WIN32)
++	set(BOOST_ROOT "C:/boost_1_89_0")
++	set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
++	# CompileBoost.cmake finds Boost in config mode on Windows: the staged BoostConfig.cmake lives under stage/lib/cmake.
++	list(APPEND CMAKE_PREFIX_PATH "${BOOST_ROOT}/stage")
++	set(Boost_USE_STATIC_LIBS ON)
++	set(Boost_USE_MULTITHREADED ON)
++	set(Boost_USE_STATIC_RUNTIME ON)
++	set(BUILD_C_BINDING ON)
++	
++	set(WITH_SWIFT OFF CACHE BOOL "Disable Swift on Windows")
++	set(CMAKE_Swift_COMPILER "" CACHE FILEPATH "Disable Swift compiler")
++	set(FOUNDATIONDB_CROSS_COMPILING OFF CACHE BOOL "Force cross-compiling to skip Swift targets")
++
++	set(OPEN_FOR_IDE OFF CACHE BOOL "Build from command line only on Windows")
++	
++	# simplify build
++	set(BUILD_DOCUMENTATION OFF CACHE BOOL "Don't build Sphinx Documentation on Windows")
++	set(BUILD_AWS_BACKUP OFF CACHE BOOL "No AWS backup support on Windows")
++	set(WITH_GRPC OFF CACHE BOOL "No gRPC support on Windows")
++	set(USE_VALGRIND OFF CACHE BOOL "No Valgrind")
++	set(BUILD_PYTHON_BINDING OFF CACHE BOOL "Do not build Python binding on Windows")
++	set(BUILD_JAVA_BINDING	OFF CACHE BOOL "Do not build JAVA binding on Windows")
++	set(BUILD_GO_BINDING OFF CACHE BOOL "Do not build Go binding on Windows")
++	set(BUILD_RUBY_BINDING OFF CACHE BOOL "Do not build Ruby binding on Windows")
++	set(WITH_ROCKSDB OFF CACHE BOOL "Disable RocksDB on Windows")
++	set(WITH_ACAC OFF CACHE BOOL "Disable ACAC on Windows")
++	set(NO_MULTIREGION_TEST ON CACHE BOOL "Disable Multi-Region Test on Windows")
++
++	# File and product version resource for the Windows binaries. The call is deferred to the end of this
++	# file, when the targets and FDB_VERSION exist.
++	function(fdb_windows_version_info)
++		foreach(spec "fdb_c|fdb_c.dll|FoundationDB C client library|VFT_DLL"
++		             "fdbcli|fdbcli.exe|FoundationDB command line interface|VFT_APP")
++			string(REPLACE "|" ";" spec "${spec}")
++			list(GET spec 0 VI_TARGET)
++			list(GET spec 1 VI_FILENAME)
++			list(GET spec 2 VI_DESCRIPTION)
++			list(GET spec 3 VI_FILETYPE)
++			if(TARGET ${VI_TARGET})
++				configure_file(${CMAKE_SOURCE_DIR}/cmake/WindowsVersionInfo.rc.in ${CMAKE_BINARY_DIR}/versioninfo/${VI_TARGET}.rc @ONLY)
++				target_sources(${VI_TARGET} PRIVATE ${CMAKE_BINARY_DIR}/versioninfo/${VI_TARGET}.rc)
++			endif()
++		endforeach()
++	endfunction()
++	cmake_language(DEFER CALL fdb_windows_version_info)
++endif()
++###
++
+ if(WITH_SWIFT)
+   enable_language(Swift)
+ endif()
+@@ -235,8 +285,10 @@ configure_file(fdb.cluster.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdb.cluster)
+ ###############################################################################
+ # testing
+ ###############################################################################
+-include(CTest)
+-enable_testing()
++if(NOT WIN32)
++  include(CTest)
++  enable_testing()
++endif()
+ 
+ ###############################################################################
+ # Directory structure
+@@ -291,7 +343,9 @@ if(NOT WIN32)
+   endif()
+ endif()
+ add_subdirectory(fdbbackup)
+-add_subdirectory(tests)
++if(NOT WIN32)
++  add_subdirectory(tests)
++endif()
+ if(WITH_PYTHON AND WITH_C_BINDING)
+   if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
+                                        # x-compiling.
+@@ -305,9 +359,7 @@ if(WITH_DOCUMENTATION)
+   endif()
+ endif()
+ 
+-if(WIN32)
+-  add_subdirectory(packaging/msi)
+-else()
++if(NOT WIN32)
+   include(CPack)
+ endif()
+ 
+diff --git a/cmake/WindowsVersionInfo.rc.in b/cmake/WindowsVersionInfo.rc.in
+new file mode 100644
+index 0000000000..1617c6de2d
+--- /dev/null
++++ b/cmake/WindowsVersionInfo.rc.in
+@@ -0,0 +1,31 @@
++// Windows version resource, configured per target by fdb_windows_version_info() in CMakeLists.txt.
++#include <winver.h>
++
++VS_VERSION_INFO VERSIONINFO
++ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
++ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
++ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
++ FILEFLAGS 0
++ FILEOS VOS_NT_WINDOWS32
++ FILETYPE @VI_FILETYPE@
++ FILESUBTYPE VFT2_UNKNOWN
++BEGIN
++  BLOCK "StringFileInfo"
++  BEGIN
++    BLOCK "040904b0"
++    BEGIN
++      VALUE "CompanyName", "FoundationDB project"
++      VALUE "FileDescription", "@VI_DESCRIPTION@"
++      VALUE "FileVersion", "@FDB_VERSION@"
++      VALUE "InternalName", "@VI_TARGET@"
++      VALUE "LegalCopyright", "Copyright Apple Inc. and the FoundationDB project authors. Apache License 2.0."
++      VALUE "OriginalFilename", "@VI_FILENAME@"
++      VALUE "ProductName", "FoundationDB"
++      VALUE "ProductVersion", "@FDB_VERSION@ (@CURRENT_GIT_VERSION@)"
++    END
++  END
++  BLOCK "VarFileInfo"
++  BEGIN
++    VALUE "Translation", 0x409, 1200
++  END
++END
+diff --git a/fdbclient/CMakeLists.txt b/fdbclient/CMakeLists.txt
+index fd7252768c..8252b4c3a0 100644
+--- a/fdbclient/CMakeLists.txt
++++ b/fdbclient/CMakeLists.txt
+@@ -101,7 +101,7 @@ target_link_libraries(s3client PRIVATE
+     boost_target_program_options
+ )
+ 
+-if(UNIX AND NOT APPLE)
++if(UNIX AND NOT APPLE AND NOT WIN32)
+     target_link_libraries(s3client PRIVATE folly_memcpy)
+ endif()
+ 
+diff --git a/fdbclient/S3Client_cli.cpp b/fdbclient/S3Client_cli.cpp
+index be988ad23b..361b4b86f0 100644
+--- a/fdbclient/S3Client_cli.cpp
++++ b/fdbclient/S3Client_cli.cpp
+@@ -31,7 +31,7 @@
+ #endif
+ 
+ #include "fdbclient/BuildFlags.h"
+-#import "fdbclient/BackupTLSConfig.h"
++#include "fdbclient/BackupTLSConfig.h"
+ #include "fdbclient/Knobs.h"
+ #include "fdbclient/NativeAPI.h"
+ #include "fdbclient/versions.h"
+diff --git a/fdbclient/include/fdbclient/Knobs.h b/fdbclient/include/fdbclient/Knobs.h
+index 0789b861ef..6e6a742cad 100644
+--- a/fdbclient/include/fdbclient/Knobs.h
++++ b/fdbclient/include/fdbclient/Knobs.h
+@@ -27,6 +27,11 @@
+ #include "flow/Knobs.h"
+ #include "flow/flow.h"
+ 
++#ifdef _WIN32
++// winnt.h defines STATUS_TIMEOUT as an NTSTATUS macro; the client knob below has the same name.
++#undef STATUS_TIMEOUT
++#endif
++
+ FDB_BOOLEAN_PARAM(Randomize);
+ FDB_BOOLEAN_PARAM(IsSimulated);
+ 
+diff --git a/fdbclient/include/fdbclient/RandomKeyValueUtils.h b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
+index e0ad845db6..4690599500 100644
+--- a/fdbclient/include/fdbclient/RandomKeyValueUtils.h
++++ b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
+@@ -223,7 +223,7 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
+ 		int inserts = 0;
+ 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
+ 		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
+-		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
++		const unsigned int maxInsertTry = 3 * indexGenerator.max + (((sizeof(unsigned int) * 8) - clz(indexGenerator.max)) * 100);
+ 		while (uniqueKeys.size() < indexGenerator.max) {
+ 			auto k = keyGen.next();
+ 			uniqueKeys.insert(k);
+diff --git a/fdbserver/kvstore/VFSAsync.cpp b/fdbserver/kvstore/VFSAsync.cpp
+index 103dfed5d7..053df23703 100644
+--- a/fdbserver/kvstore/VFSAsync.cpp
++++ b/fdbserver/kvstore/VFSAsync.cpp
+@@ -441,7 +441,7 @@ static int asyncShmLock(sqlite3_file* fd, /* Database file holding the shared me
+ ** any load or store begun after the barrier.
+ */
+ static void asyncShmBarrier(sqlite3_file*) {
+-#if WIN32
++#if _WIN32
+ 	_ReadWriteBarrier();
+ #else
+ 	__sync_synchronize();
+diff --git a/flow/Hash3.c b/flow/Hash3.c
+index fc3d26ef1f..73735e36ca 100644
+--- a/flow/Hash3.c
++++ b/flow/Hash3.c
+@@ -43,7 +43,7 @@ on 1 byte), but shoehorning those bytes into integers efficiently is messy.
+  * My best guess at if you are big-endian or little-endian.  This may
+  * need adjustment.
+  */
+-#ifdef WIN32
++#ifdef _WIN32
+ #define HASH_LITTLE_ENDIAN 1
+ #define HASH_BIG_ENDIAN 0
+ #else
+diff --git a/flow/Net2.cpp b/flow/Net2.cpp
+index a36ee5c586..0363e919f1 100644
+--- a/flow/Net2.cpp
++++ b/flow/Net2.cpp
+@@ -1395,6 +1395,8 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
+ 	updateNow();
+ }
+ 
++#if _WIN32
++#else
+ static Future<Void> reloadCertificatesOnChange(
+     TLSConfig config,
+     std::function<void()> onPolicyFailure,
+@@ -1442,8 +1444,12 @@ static Future<Void> reloadCertificatesOnChange(
+ 		}
+ 	}
+ }
++#endif
+ 
+ void Net2::initTLS(ETLSInitState targetState) {
++#if _WIN32
++	return;
++#else
+ 	if (tlsInitializedState >= targetState) {
+ 		return;
+ 	}
+@@ -1508,6 +1514,7 @@ void Net2::initTLS(ETLSInitState targetState) {
+ 	}
+ 
+ 	tlsInitializedState = targetState;
++#endif
+ }
+ 
+ Future<Void> Net2::logTimeOffset() {
+diff --git a/flow/Platform.cpp b/flow/Platform.cpp
+index 2fbdafdfc4..5fd7820042 100644
+--- a/flow/Platform.cpp
++++ b/flow/Platform.cpp
+@@ -1584,7 +1584,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
+ 		initPdhStrings(*statState, dataFolder);
+ 
+ 		TraceEvent("SetupQuery").log();
+-		handlePdhStatus(PdhOpenQuery(nullptr, nullptr, &(*statState)->Query), "PdhOpenQuery");
++		handlePdhStatus(PdhOpenQuery(nullptr, 0, &(*statState)->Query), "PdhOpenQuery");
+ 
+ 		if (!(*statState)->pdhStrings.diskDevice.empty()) {
+ 			handlePdhStatus(
+@@ -3521,7 +3521,7 @@ std::string get_backtrace() {
+ 
+ namespace platform {
+ std::string format_backtrace(void** addresses, int numAddresses) {
+-	ImageInfo const& imageInfo = getCachedImageInfo();
++	ImageInfo const& imageInfo = getImageInfo();
+ 
+ 	std::string s;
+ #if defined(_WIN32)
+diff --git a/flow/Trace.cpp b/flow/Trace.cpp
+index 8c3bf1c8cd..31f712c243 100644
+--- a/flow/Trace.cpp
++++ b/flow/Trace.cpp
+@@ -43,6 +43,7 @@
+ 
+ #ifdef _WIN32
+ #include <windows.h>
++#include <chrono>
+ #undef max
+ #undef min
+ #endif
+diff --git a/flow/UnitTestRunner.cpp b/flow/UnitTestRunner.cpp
+index a93e724e14..e39674d0d3 100644
+--- a/flow/UnitTestRunner.cpp
++++ b/flow/UnitTestRunner.cpp
+@@ -42,6 +42,9 @@
+ 
+ #ifndef _WIN32
+ #include <unistd.h>
++#else
++#include <direct.h>
++#include <process.h>
+ #endif
+ 
+ namespace {
+diff --git a/flow/include/flow/Platform.h b/flow/include/flow/Platform.h
+index 3a2bf7e018..92bb4aaf7e 100644
+--- a/flow/include/flow/Platform.h
++++ b/flow/include/flow/Platform.h
+@@ -727,10 +727,6 @@ inline static void flushOutputStreams() {
+ #define DEFAULT_CONSTRUCTORS(X)
+ #endif
+ 
+-#if defined(_WIN32)
+-#define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
+-#endif
+-
+ #if defined(_MSC_VER)
+ inline static void* aligned_alloc(size_t alignment, size_t size) {
+ 	return _aligned_malloc(size, alignment);
+diff --git a/flow/include/flow/flat_buffers.h b/flow/include/flow/flat_buffers.h
+index e27deb998f..7076845c25 100644
+--- a/flow/include/flow/flat_buffers.h
++++ b/flow/include/flow/flat_buffers.h
+@@ -40,6 +40,9 @@
+ #include "flow/FileIdentifier.h"
+ #include "flow/ObjectSerializerTraits.h"
+ 
++//WIN32:
++#include <stdexcept>
++
+ template <class T = pack<>, class...>
+ struct concat {
+ 	using type = T;
+diff --git a/flow/include/flow/singleton.h b/flow/include/flow/singleton.h
+index 392e5a98b7..11749caef8 100644
+--- a/flow/include/flow/singleton.h
++++ b/flow/include/flow/singleton.h
+@@ -27,7 +27,7 @@
+ #include <cstdlib>
+ #include <cassert>
+ 
+-#ifdef WIN32
++#ifdef _WIN32
+ #include <system_error>
+ #include <Windows.h>
+ #endif
+diff --git a/flow/include/flow/swift.h b/flow/include/flow/swift.h
+index c1e44ea053..bca65617c6 100644
+--- a/flow/include/flow/swift.h
++++ b/flow/include/flow/swift.h
+@@ -32,9 +32,18 @@
+ 
+ // ==== ----------------------------------------------------------------------------------------------------------------
+ 
+-inline pthread_t _tid() {
+-	return pthread_self();
+-}
++
++#ifdef _WIN32
++	#include <windows.h>
++	inline DWORD _tid() {
++		return GetCurrentThreadId();
++	}
++#else
++	#include <pthread.h>
++	inline pthread_t _tid() {
++		return pthread_self();
++	}
++#endif
+ 
+ // ==== ----------------------------------------------------------------------------------------------------------------
+ 

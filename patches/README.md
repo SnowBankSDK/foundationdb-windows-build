@@ -7,6 +7,7 @@ and stub TLS. `scripts\build-fdb.ps1` applies one branch patch by release line, 
 
 | File | Applies to | Files touched |
 |---|---|---|
+| `windows-8.0.0.patch` | 8.0 tags | 16 |
 | `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 16 |
 | `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag) | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
@@ -14,6 +15,47 @@ and stub TLS. `scripts\build-fdb.ps1` applies one branch patch by release line, 
 | `extra\knob-status-timeout-header.patch` | tags whose `ClientKnobs.h` still lacks the `#undef` (7.3.78 and later 7.3 tags) | 1 |
 | `extra\knob-status-timeout-source.patch` | tags where `windows.h` is included after the knob header in the two client sources that use the knob (7.3.78 and later 7.3 tags; harmless on 7.4) | 2 |
 | `vcpkg.json` | copied to the source root of every tag | manifest |
+
+## The 8.0 patch
+
+8.0 removed the actor compiler (Flow actors are C++20 coroutines), made Swift opt-in, and renamed most
+`.actor.cpp` files. The 8.0 patch keeps the intent of the 7.4 hunks that still apply and adds the fixes
+8.0 needs.
+
+Carried from 7.4, unchanged or moved to the renamed file:
+
+- `CMakeLists.txt`: the `WIN32` block, with `BOOST_ROOT` at `C:/boost_1_89_0` and without
+  `cmake_policy(CMP0167 OLD)` (8.0 finds Boost in config mode). `include(CTest)`, `enable_testing()` and
+  `add_subdirectory(tests)` stay behind `NOT WIN32`, and the `packaging/msi` subdirectory is skipped.
+- `fdbclient/CMakeLists.txt` (`folly_memcpy`), `RandomKeyValueUtils.h` (`uint`), `flow/Hash3.c` (`_WIN32`),
+  `flow/Trace.cpp` (`<chrono>`), `flat_buffers.h` (`<stdexcept>`), `swift.h` (`_tid()`): as in 7.4.
+- `flow/Net2.cpp` (was `Net2.actor.cpp`): the TLS stub. The Windows `fdb_c.dll` does not do TLS.
+- `fdbclient/S3Client_cli.cpp` (was `.actor.cpp`): `#import` to `#include`.
+- `fdbclient/include/fdbclient/Knobs.h` (was `ClientKnobs.h`): `#undef STATUS_TIMEOUT` after the includes.
+- `fdbserver/kvstore/VFSAsync.cpp` (was `fdbserver/VFSAsync.cpp`): `WIN32` to `_WIN32`.
+
+Dropped: the actor compiler hunks (`CompileActorCompiler.cmake`, `AssemblyInfo.cs`, the `actorcompiler_build`
+and `TLSConfig.actor.g.cpp` lines in `flow/CMakeLists.txt`), `ActorFuzzUnitTest.cpp` (deleted upstream), the
+documentation hunk (`BUILD_DOCUMENTATION OFF` already turns `WITH_DOCUMENTATION` off), the `FLOW_SRCS` debug
+dump, and the `flow.h` hunk (8.0 no longer includes `pthread.h` there).
+
+New in 8.0:
+
+- `flow/include/flow/Platform.h`: removes the `strtoull` to `_strtoui64` macro. Boost 1.89 Asio calls
+  `std::strtoull`, which the macro turned into the undeclared `std::_strtoui64`.
+- `flow/Platform.cpp`: `PdhOpenQuery(nullptr, 0, ...)`, because the second parameter is an integer
+  (`DWORD_PTR`); `format_backtrace` calls `getImageInfo()`, because `getCachedImageInfo()` exists only on
+  Unix.
+- `flow/UnitTestRunner.cpp` (new upstream): includes `<direct.h>` and `<process.h>` on Windows for `chdir`
+  and `getpid`.
+- `flow/include/flow/singleton.h`: `WIN32` to `_WIN32` on the `<Windows.h>` include, which the `_WIN32`
+  mutex guard below it needs.
+- `CMakeLists.txt` and the new `cmake/WindowsVersionInfo.rc.in`: a version resource on `fdb_c.dll` and
+  `fdbcli.exe` (FileVersion, ProductVersion with the source commit, ProductName). The `WIN32` block defers
+  the call to the end of the file, when both targets exist.
+
+The 8.0 patch adds one file, so save it with `git add -N cmake/WindowsVersionInfo.rc.in` before
+`git diff > patches\windows-<tag>.patch`.
 
 ## The 7.4.8 port
 
