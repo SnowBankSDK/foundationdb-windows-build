@@ -148,6 +148,48 @@ index 0000000000..1617c6de2d
 +    VALUE "Translation", 0x409, 1200
 +  END
 +END
+diff --git a/fdbcli/fdbcli.cpp b/fdbcli/fdbcli.cpp
+index b8d4b591e9..b59c0115ab 100644
+--- a/fdbcli/fdbcli.cpp
++++ b/fdbcli/fdbcli.cpp
+@@ -60,6 +60,10 @@
+ #include "fdbcli/fdbcli.h"
+ 
+ #include <cinttypes>
++#ifdef _WIN32
++#include <windows.h>
++#include <shellapi.h>
++#endif
+ #include <cstdio>
+ #include <type_traits>
+ #include <signal.h>
+@@ -2085,6 +2089,26 @@ const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs)
+ }
+ 
+ int main(int argc, char** argv) {
++#ifdef _WIN32
++	// Windows hands main() its arguments in the ANSI code page, which loses characters outside it (in a
++	// cluster file path, for example). The rest of the client reads paths as UTF-8, so argv is rebuilt
++	// from the UTF-16 command line.
++	std::vector<std::string> utf8Args;
++	std::vector<char*> utf8Argv;
++	int wideArgc = 0;
++	if (wchar_t** wideArgv = CommandLineToArgvW(GetCommandLineW(), &wideArgc)) {
++		for (int i = 0; i < wideArgc; i++) {
++			utf8Args.push_back(platform::fromWidePath(wideArgv[i]));
++		}
++		LocalFree(wideArgv);
++		for (auto& arg : utf8Args) {
++			utf8Argv.push_back(arg.data());
++		}
++		utf8Argv.push_back(nullptr);
++		argc = wideArgc;
++		argv = utf8Argv.data();
++	}
++#endif
+ 	platformInit();
+ 	Error::init();
+ 	std::set_new_handler(&platform::outOfMemory);
 diff --git a/fdbclient/CMakeLists.txt b/fdbclient/CMakeLists.txt
 index fd7252768c..8252b4c3a0 100644
 --- a/fdbclient/CMakeLists.txt
@@ -369,7 +411,7 @@ index 0789b861ef..6e6a742cad 100644
  FDB_BOOLEAN_PARAM(IsSimulated);
  
 diff --git a/fdbrpc/AsyncFileWinASIO.h b/fdbrpc/AsyncFileWinASIO.h
-index f91aff4c87..acd0007922 100644
+index f91aff4c87..bba062e944 100644
 --- a/fdbrpc/AsyncFileWinASIO.h
 +++ b/fdbrpc/AsyncFileWinASIO.h
 @@ -20,7 +20,7 @@
@@ -381,6 +423,15 @@ index f91aff4c87..acd0007922 100644
  
  #define Net2AsyncFile AsyncFileWinASIO
  
+@@ -49,7 +49,7 @@ public:
+ 			open_filename = filename + ".part";
+ 		}
+ 
+-		HANDLE h = CreateFile(open_filename.c_str(),
++		HANDLE h = CreateFileW(platform::toWidePath(open_filename).c_str(),
+ 		                      GENERIC_READ | ((flags & OPEN_READWRITE) ? GENERIC_WRITE : 0),
+ 		                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+ 		                      nullptr,
 @@ -180,8 +180,15 @@ public:
  
  		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
@@ -390,8 +441,8 @@ index f91aff4c87..acd0007922 100644
 +			// FIXME: MoveFileEx in a worker thread?
 +			// MoveFile fails when the target exists, so REPLACE_EXISTING gives the rename() semantics of the
 +			// other platforms; a failed rename must not report a committed file.
-+			if (!MoveFileExA((filename + ".part").c_str(),
-+			                 filename.c_str(),
++			if (!MoveFileExW(platform::toWidePath(filename + ".part").c_str(),
++			                 platform::toWidePath(filename).c_str(),
 +			                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 +				TraceEvent(SevError, "AsyncFileAtomicRenameError").detail("File", filename).GetLastError();
 +				throw io_error();
@@ -547,7 +598,7 @@ index a36ee5c586..69c00c0980 100644
  #endif
  } // Net2::run
 diff --git a/flow/Platform.cpp b/flow/Platform.cpp
-index 2fbdafdfc4..8e71bdb7ea 100644
+index 2fbdafdfc4..aad71d53b8 100644
 --- a/flow/Platform.cpp
 +++ b/flow/Platform.cpp
 @@ -70,7 +70,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
@@ -558,7 +609,34 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  #include <pdh.h>
  #include <pdhmsg.h>
  #include <processenv.h>
-@@ -576,15 +575,12 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
+@@ -214,6 +213,26 @@ __int64 FiletimeAsInt64(FILETIME& t) {
+ #endif
+ 
+ #ifdef _WIN32
++std::wstring platform::toWidePath(std::string const& utf8) {
++	if (utf8.empty()) {
++		return std::wstring();
++	}
++	int n = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), (int)utf8.size(), nullptr, 0);
++	std::wstring result(n, L'\0');
++	MultiByteToWideChar(CP_UTF8, 0, utf8.data(), (int)utf8.size(), result.data(), n);
++	return result;
++}
++
++std::string platform::fromWidePath(const wchar_t* utf16) {
++	int n = WideCharToMultiByte(CP_UTF8, 0, utf16, -1, nullptr, 0, nullptr, nullptr);
++	if (n <= 1) {
++		return std::string();
++	}
++	std::string result(n - 1, '\0');
++	WideCharToMultiByte(CP_UTF8, 0, utf16, -1, result.data(), n, nullptr, nullptr);
++	return result;
++}
++
+ bool handlePdhStatus(const PDH_STATUS& status, std::string message) {
+ 	if (status != ERROR_SUCCESS) {
+ 		TraceEvent(SevWarnAlways, message.c_str()).GetLastError().detail("Status", status);
+@@ -576,15 +595,12 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
  		throw platform_error();
  	}
  
@@ -579,7 +657,16 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  #elif defined(__APPLE__)
  	vm_statistics_data_t vm_stat;
  	vm_size_t pagesize;
-@@ -1584,7 +1580,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
+@@ -659,7 +675,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
+ 	ULARGE_INTEGER freeSpace;
+ 	ULARGE_INTEGER totalSpace;
+ 	ULARGE_INTEGER totalFreeSpace;
+-	if (!GetDiskFreeSpaceEx(fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
++	if (!GetDiskFreeSpaceExW(platform::toWidePath(fullPath).c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
+ 		Error e = systemErrorCodeToError();
+ 		TraceEvent(SevError, "DiskFreeError").error(e).detail("Path", fullPath).GetLastError();
+ 		throw e;
+@@ -1584,7 +1600,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
  		initPdhStrings(*statState, dataFolder);
  
  		TraceEvent("SetupQuery").log();
@@ -588,7 +675,7 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  
  		if (!(*statState)->pdhStrings.diskDevice.empty()) {
  			handlePdhStatus(
-@@ -1802,7 +1798,7 @@ struct OffsetTimer {
+@@ -1802,7 +1818,7 @@ struct OffsetTimer {
  
  		offset = 0;
  		double timer = now();
@@ -597,7 +684,7 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  		static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
  		offset = (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9 - timer;
  	}
-@@ -1879,7 +1875,7 @@ double timer() {
+@@ -1879,7 +1895,7 @@ double timer() {
  	    11644473600LL *
  	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
  	FILETIME fileTime;
@@ -606,7 +693,7 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  	static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
  	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9;
  #elif defined(__linux__) || defined(__FreeBSD__)
-@@ -1901,7 +1897,7 @@ uint64_t timer_int() {
+@@ -1901,7 +1917,7 @@ uint64_t timer_int() {
  	    11644473600LL *
  	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
  	FILETIME fileTime;
@@ -615,7 +702,127 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  	static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
  	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH);
  #elif defined(__linux__) || defined(__FreeBSD__)
-@@ -2879,8 +2875,43 @@ void setCloseOnExec(int fd) {
+@@ -2269,8 +2285,8 @@ void renamedFile() {
+ void renameFile(std::string const& fromPath, std::string const& toPath) {
+ 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
+ #ifdef _WIN32
+-	if (MoveFileExA(fromPath.c_str(),
+-	                toPath.c_str(),
++	if (MoveFileExW(platform::toWidePath(fromPath).c_str(),
++	                platform::toWidePath(toPath).c_str(),
+ 	                MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+ 		// renamedFile();
+ 		return;
+@@ -2364,8 +2380,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
+ 		}
+ 		f = 0;
+ 
+-		if (!MoveFileExA(tempfilename.c_str(),
+-		                 path.c_str(),
++		if (!MoveFileExW(platform::toWidePath(tempfilename).c_str(),
++		                 platform::toWidePath(path).c_str(),
+ 		                 MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+ 			throw io_error();
+ 		}
+@@ -2404,7 +2420,7 @@ static bool deletedFile() {
+ bool deleteFile(std::string const& filename) {
+ 	INJECT_FAULT(platform_error, "deleteFile"); // file deletion failed
+ #ifdef _WIN32
+-	if (DeleteFile(filename.c_str()))
++	if (DeleteFileW(platform::toWidePath(filename).c_str()))
+ 		return deletedFile();
+ 	if (GetLastError() == ERROR_FILE_NOT_FOUND)
+ 		return false;
+@@ -2431,7 +2447,7 @@ bool createDirectory(std::string const& directory) {
+ 	INJECT_FAULT(platform_error, "createDirectory"); // create dir failed
+ 
+ #ifdef _WIN32
+-	if (CreateDirectory(directory.c_str(), nullptr)) {
++	if (CreateDirectoryW(platform::toWidePath(directory).c_str(), nullptr)) {
+ 		createdDirectory();
+ 		return true;
+ 	}
+@@ -2588,17 +2604,23 @@ std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist)
+ 	}
+ 
+ #ifdef _WIN32
+-	char nameBuffer[MAX_PATH];
+-	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
++	std::wstring widePath = platform::toWidePath(path);
++	DWORD wideSize = GetFullPathNameW(widePath.c_str(), 0, nullptr, nullptr);
++	std::wstring wideName(wideSize, L'\0');
++	if (wideSize != 0) {
++		wideSize = GetFullPathNameW(widePath.c_str(), wideSize, wideName.data(), nullptr);
++	}
++	std::string nameBuffer = wideSize != 0 ? platform::fromWidePath(wideName.c_str()) : std::string();
++	if (wideSize == 0 || (mustExist && !fileExists(nameBuffer))) {
+ 		Error e = systemErrorCodeToError();
+ 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
+ 		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
+ 		throw e;
+ 	}
+ 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
+-	for (char* x = nameBuffer; *x; x++)
+-		if (*x == '/')
+-			*x = CANONICAL_PATH_SEPARATOR;
++	for (char& x : nameBuffer)
++		if (x == '/')
++			x = CANONICAL_PATH_SEPARATOR;
+ 	return nameBuffer;
+ #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+ 	char result[PATH_MAX];
+@@ -2650,12 +2672,12 @@ std::string getUserHomeDirectory() {
+ 	}
+ 	return ret;
+ #elif defined(_WIN32)
+-	TCHAR szPath[MAX_PATH];
+-	if (SHGetFolderPath(nullptr, CSIDL_PROFILE, nullptr, 0, szPath) != S_OK) {
++	wchar_t szPath[MAX_PATH];
++	if (SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, szPath) != S_OK) {
+ 		TraceEvent(SevError, "GetUserHomeDirectory").GetLastError();
+ 		throw platform_error();
+ 	}
+-	std::string path(szPath);
++	std::string path = platform::fromWidePath(szPath);
+ 	return path;
+ #else
+ #error Port me!
+@@ -2681,8 +2703,8 @@ AsyncResult<std::vector<std::string>> findFiles(std::string directory,
+ 	std::vector<std::string> result;
+ 	int64_t tsc_begin = timestampCounter();
+ 
+-	WIN32_FIND_DATA fd;
+-	HANDLE h = FindFirstFile((directory + "/*" + extension).c_str(), &fd);
++	WIN32_FIND_DATAW fd;
++	HANDLE h = FindFirstFileW(platform::toWidePath(directory + "/*" + extension).c_str(), &fd);
+ 	if (h == INVALID_HANDLE_VALUE) {
+ 		if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
+ 			TraceEvent(SevError, "FindFirstFile")
+@@ -2693,12 +2715,12 @@ AsyncResult<std::vector<std::string>> findFiles(std::string directory,
+ 		}
+ 	} else {
+ 		while (true) {
+-			std::string name = fd.cFileName;
++			std::string name = platform::fromWidePath(fd.cFileName);
+ 			if ((directoryOnly && acceptDirectory(fd.dwFileAttributes, name, extension)) ||
+ 			    (!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
+ 				result.push_back(name);
+ 			}
+-			if (!FindNextFile(h, &fd))
++			if (!FindNextFileW(h, &fd))
+ 				break;
+ 			if (async && timestampCounter() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
+ 				co_await yield();
+@@ -2860,7 +2882,7 @@ namespace platform {
+ 
+ void makeTemporary(const char* filename) {
+ #ifdef _WIN32
+-	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
++	SetFileAttributesW(platform::toWidePath(filename).c_str(), FILE_ATTRIBUTE_TEMPORARY);
+ #endif
+ }
+ 
+@@ -2879,8 +2901,43 @@ void setCloseOnExec(int fd) {
  } // namespace platform
  
  #ifdef _WIN32
@@ -660,7 +867,7 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  }
  #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
  
-@@ -2964,6 +2995,7 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const
+@@ -2964,6 +3021,7 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const
  void waitThread(THREAD_HANDLE thread) {
  #ifdef _WIN32
  	WaitForSingleObject(thread, INFINITE);
@@ -668,7 +875,32 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
  	pthread_join(thread, nullptr);
  #else
-@@ -3455,6 +3487,10 @@ std::string get_backtrace() {
+@@ -2989,7 +3047,7 @@ bool fileExists(std::string const& filename) {
+ 
+ bool directoryExists(std::string const& path) {
+ #ifdef _WIN32
+-	DWORD bits = ::GetFileAttributes(path.c_str());
++	DWORD bits = ::GetFileAttributesW(platform::toWidePath(path).c_str());
+ 	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
+ #else
+ 	DIR* d = opendir(path.c_str());
+@@ -3164,12 +3222,12 @@ extern std::string format(const char* form, ...);
+ namespace platform {
+ std::string getDefaultConfigPath() {
+ #ifdef _WIN32
+-	TCHAR szPath[MAX_PATH];
+-	if (SHGetFolderPath(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, szPath) != S_OK) {
++	wchar_t szPath[MAX_PATH];
++	if (SHGetFolderPathW(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, szPath) != S_OK) {
+ 		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
+ 		throw platform_error();
+ 	}
+-	std::string _filepath(szPath);
++	std::string _filepath = platform::fromWidePath(szPath);
+ 	return _filepath + "\\foundationdb";
+ #elif defined(__linux__)
+ 	return "/etc/foundationdb";
+@@ -3455,6 +3513,10 @@ std::string get_backtrace() {
  ImageInfo getImageInfo() {
  	return ImageInfo();
  }
@@ -679,7 +911,54 @@ index 2fbdafdfc4..8e71bdb7ea 100644
  } // namespace platform
  #else
  #include <dlfcn.h>
-@@ -3698,11 +3734,6 @@ std::string exePath() {
+@@ -3582,7 +3644,7 @@ bool isLibraryLoaded(const char* lib_path) {
+ #if defined(__unixish__)
+ 	dlobj = dlopen(lib_path, RTLD_NOLOAD | RTLD_LAZY);
+ #else
+-	dlobj = GetModuleHandle(lib_path);
++	dlobj = GetModuleHandleW(platform::toWidePath(lib_path).c_str());
+ #endif
+ 
+ 	return dlobj != nullptr;
+@@ -3606,7 +3668,7 @@ void* loadLibrary(const char* lib_path) {
+ 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
+ 	}
+ #else
+-	dlobj = LoadLibrary(lib_path);
++	dlobj = LoadLibraryW(platform::toWidePath(lib_path).c_str());
+ 	if (dlobj == nullptr) {
+ 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).GetLastError();
+ 	}
+@@ -3678,19 +3740,18 @@ std::string exePath() {
+ 	}
+ #elif defined(_WIN32)
+ 	DWORD bufSize = 1024;
+-	std::unique_ptr<char[]> buf(new char[bufSize]);
++	std::unique_ptr<wchar_t[]> buf(new wchar_t[bufSize]);
+ 	while (true) {
+-		auto s = GetModuleFileName(nullptr, buf.get(), bufSize);
+-		if (s >= 0) {
+-			if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+-				bufSize *= 2;
+-				buf.reset(new char[bufSize]);
+-				continue;
+-			}
+-			return std::string(buf.get());
+-		} else {
++		DWORD s = GetModuleFileNameW(nullptr, buf.get(), bufSize);
++		if (s == 0) {
+ 			throw platform_error();
+ 		}
++		if (s == bufSize) {
++			bufSize *= 2;
++			buf.reset(new wchar_t[bufSize]);
++			continue;
++		}
++		return platform::fromWidePath(buf.get());
+ 	}
+ #else
+ #error Port me!
+@@ -3698,10 +3759,11 @@ std::string exePath() {
  }
  
  void platformInit() {
@@ -687,10 +966,29 @@ index 2fbdafdfc4..8e71bdb7ea 100644
 -	_set_FMA3_enable(
 -	    0); // Workaround for VS 2013 code generation bug. See
 -	        // https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
--#endif
++#ifdef _WIN32
++	// Paths reach this module as UTF-8. The C runtime converts the char* file names of fopen, _open, _stat
++	// and the C++ streams with the code page of its locale, and ".UTF8" makes that UTF-8. Only LC_CTYPE
++	// changes, and the statically linked runtime keeps the setting private to this module.
++	setlocale(LC_CTYPE, ".UTF8");
+ #endif
  #ifdef __linux__
  	struct timespec ts;
- 	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+@@ -4053,9 +4115,11 @@ std::string getExecPath() {
+ 		throwExecPathError(platform_error(), path);
+ 	}
+ #elif defined(_WIN32)
+-	auto len = GetModuleFileName(nullptr, path, size);
+-	if (len != 0) {
+-		return std::string(path);
++	path[0] = '\0';
++	std::unique_ptr<wchar_t[]> widePath(new wchar_t[size]);
++	auto len = GetModuleFileNameW(nullptr, widePath.get(), size);
++	if (len != 0 && len < size) {
++		return platform::fromWidePath(widePath.get());
+ 	} else {
+ 		throwExecPathError(platform_error(), path);
+ 	}
 diff --git a/flow/Trace.cpp b/flow/Trace.cpp
 index 8c3bf1c8cd..31f712c243 100644
 --- a/flow/Trace.cpp
@@ -759,7 +1057,7 @@ index 605691bbef..811e34a493 100644
  		return -1;
  	}
 diff --git a/flow/include/flow/Platform.h b/flow/include/flow/Platform.h
-index 3a2bf7e018..1d5f35c423 100644
+index 3a2bf7e018..f2d9e978f0 100644
 --- a/flow/include/flow/Platform.h
 +++ b/flow/include/flow/Platform.h
 @@ -70,10 +70,6 @@
@@ -811,6 +1109,22 @@ index 3a2bf7e018..1d5f35c423 100644
  }
  #else
  #define ctzll __builtin_ctzll
+@@ -813,6 +803,15 @@ inline static int clz(uint32_t value) {
+ #define clz __builtin_clz
+ #endif
+ 
++#ifdef _WIN32
++namespace platform {
++// Paths reach the Windows build as UTF-8 (C API options, command line). The Windows "W" file functions
++// take UTF-16, so the Windows code converts at each call.
++std::wstring toWidePath(std::string const& utf8);
++std::string fromWidePath(const wchar_t* utf16);
++} // namespace platform
++#endif
++
+ // These return 0 unless run on the network thread
+ int64_t getNumProfilesDisabled();
+ int64_t getNumProfilesOverflowed();
 diff --git a/flow/include/flow/flat_buffers.h b/flow/include/flow/flat_buffers.h
 index e27deb998f..c965ed9556 100644
 --- a/flow/include/flow/flat_buffers.h

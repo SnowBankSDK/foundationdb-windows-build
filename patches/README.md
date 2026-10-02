@@ -15,7 +15,7 @@ From 8.0 on, a branch has two patch files:
 
 | File | Applies to | Files touched |
 |---|---|---|
-| `windows-8.0.0.patch` | 8.0 tags | 27 |
+| `windows-8.0.0.patch` | 8.0 tags | 28 |
 | `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 2 |
 | `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 16 |
 | `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag) | 16 |
@@ -72,6 +72,19 @@ Bug fixes (Windows code paths that upstream never ran):
   reports a failure instead of ignoring it.
 - `Platform.h`: 32-bit `clz`/`ctz` returned 63-based values and 64 for zero.
 - `Platform.cpp`: wall clock from `GetSystemTimePreciseAsFileTime` (1 to 15.6 ms steps before).
+
+UTF-8 paths: the C API passes paths as UTF-8 (trace directory, cluster file, external client library),
+and the Windows code read them in the ANSI code page, so a folder name such as `trace-Łodz` failed and the
+client ran without traces. Now:
+
+- `platformInit()` sets the C runtime's `LC_CTYPE` to `.UTF8`, so `fopen`, `_open`, `_stat` and the C++
+  file streams read their `char*` file names as UTF-8. The C runtime is linked statically, so the setting
+  stays private to `fdb_c.dll` (or `fdbcli.exe`).
+- Every Win32 path call in `Platform.cpp` and `AsyncFileWinASIO.h` uses its `W` variant through
+  `platform::toWidePath` / `fromWidePath` (declared in `Platform.h` under `_WIN32`). `abspath` has no
+  `MAX_PATH` buffer any more; `exePath` no longer returns an uninitialized buffer on failure.
+- `fdbcli.cpp`: `main()` rebuilds `argv` as UTF-8 from `GetCommandLineW()`, because Windows passes
+  `main()` its arguments in the ANSI code page.
 
 Robustness and cleanup:
 
