@@ -1,4 +1,5 @@
-# Builds the Boost 1.86.0 static libraries the FoundationDB Windows build links, with clang-cl.
+# Builds the Boost static libraries the FoundationDB Windows build links, with clang-cl: 1.86.0 for the
+# 7.3 and 7.4 branches (the default), 1.89.0 for the 8.0 branch.
 #
 # The libraries are tagged with the clang major of the compiler that built them (clangw19 for clang 19),
 # and FindBoost only matches libraries whose tag equals the clang-cl that builds FoundationDB. Rebuild
@@ -7,24 +8,33 @@
 # Usage:
 #   .\scripts\build-boost.ps1                                   # sources and stage at C:\boost_1_86_0
 #   .\scripts\build-boost.ps1 -BoostRoot D:\boost_1_86_0        # elsewhere; pass the same path to build-fdb.ps1
+#   .\scripts\build-boost.ps1 -Version 1.89.0                    # the 8.0 branch; sources and stage at C:\boost_1_89_0
 #   .\scripts\build-boost.ps1 -Variant 'debug,release' -AllLibraries   # the full stage (slower)
 #
 # The script downloads and extracts the sources when <BoostRoot>\bootstrap.bat is absent. Expect the
-# 7 libraries in release to take 5 to 15 minutes; the full stage takes longer. Windows PowerShell 5.1 or 7.
+# libraries in release to take 5 to 15 minutes; the full stage takes longer. Windows PowerShell 5.1 or 7.
 [CmdletBinding()]
 param(
-    [string] $BoostRoot = 'C:\boost_1_86_0',
+    [ValidateSet('1.86.0', '1.89.0')] [string] $Version = '1.86.0',
+    [string] $BoostRoot = '',
     [string] $StageDir = '',
     [string] $VsPath = '',
+    # A standalone LLVM install (for example C:\Program Files\LLVM) instead of the clang-cl Visual Studio bundles.
+    [string] $LlvmRoot = '',
     [string] $Variant = 'release',
     [int] $Jobs = 0,
     [switch] $AllLibraries
 )
 
 $ErrorActionPreference = 'Continue'
-$boostVersion = '1.86.0'
-$archiveUrl = 'https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2'
-$components = @('context', 'filesystem', 'iostreams', 'program_options', 'serialization', 'system', 'url')
+$boostVersion = $Version
+$underscore = $Version.Replace('.', '_')               # 1_89_0, the archive and directory name
+$libVersion = $underscore -replace '_0$', ''           # 1_89, the BOOST_LIB_VERSION and library name suffix
+if ([string]::IsNullOrEmpty($BoostRoot)) { $BoostRoot = "C:\boost_$underscore" }
+$archiveUrl = "https://archives.boost.io/release/$Version/source/boost_$underscore.tar.bz2"
+# Boost 1.89 removed the boost_system stub library (Boost.System is header-only), and the 8.0 branch links
+# neither system nor context on Windows.
+$components = if ($Version -eq '1.86.0') { @('context', 'filesystem', 'iostreams', 'program_options', 'serialization', 'system', 'url') } else { @('filesystem', 'iostreams', 'program_options', 'serialization', 'url') }
 if ([string]::IsNullOrEmpty($StageDir)) { $StageDir = Join-Path $BoostRoot 'stage' }
 if ($Jobs -le 0) { $Jobs = [int] $env:NUMBER_OF_PROCESSORS }
 $clock = [System.Diagnostics.Stopwatch]::StartNew()
@@ -40,8 +50,9 @@ function Stop-Build([string] $Message) { Write-Host "BOOST BUILD FAILED: $Messag
 Write-Phase "boost $boostVersion sources at $BoostRoot"
 if (-not (Test-Path (Join-Path $BoostRoot 'bootstrap.bat'))) {
     $parent = Split-Path -Parent $BoostRoot
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    $archive = Join-Path $parent 'boost_1_86_0.tar.bz2'
+    if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent | Out-Null }
+    # The archive goes to %TEMP%: a standard user may create a directory at a drive root but not a file.
+    $archive = Join-Path $env:TEMP "boost_$underscore.tar.bz2"
     if (-not (Test-Path $archive)) {
         Write-Host "downloading $archiveUrl"
         & curl.exe -L --fail --silent --show-error -o $archive $archiveUrl
@@ -50,14 +61,14 @@ if (-not (Test-Path (Join-Path $BoostRoot 'bootstrap.bat'))) {
     Write-Host "extracting $archive"
     & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $parent
     if ($LASTEXITCODE -ne 0) { Stop-Build "extract failed ($LASTEXITCODE)" }
-    $extracted = Join-Path $parent 'boost_1_86_0'
+    $extracted = Join-Path $parent "boost_$underscore"
     if ((Resolve-Path $extracted).Path -ne (Resolve-Path $BoostRoot -ErrorAction SilentlyContinue).Path) {
-        if (Test-Path $BoostRoot) { Stop-Build "$BoostRoot exists but has no bootstrap.bat; remove it or point -BoostRoot at the extracted boost_1_86_0" }
+        if (Test-Path $BoostRoot) { Stop-Build "$BoostRoot exists but has no bootstrap.bat; remove it or point -BoostRoot at the extracted boost_$underscore" }
         Move-Item $extracted $BoostRoot
     }
 }
 $header = Join-Path $BoostRoot 'boost\version.hpp'
-if (-not (Select-String -Path $header -Pattern 'define BOOST_LIB_VERSION "1_86"' -Quiet)) { Stop-Build "$BoostRoot is not Boost 1.86" }
+if (-not (Select-String -Path $header -Pattern "define BOOST_LIB_VERSION `"$libVersion`"" -Quiet)) { Stop-Build "$BoostRoot is not Boost $Version" }
 
 # 2. Toolchain: clang-cl for the libraries, MSVC lib.exe as the archiver, cl.exe for bootstrap.
 Write-Phase 'toolchain'
@@ -67,7 +78,7 @@ if ([string]::IsNullOrEmpty($VsPath)) {
     $VsPath = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath | Select-Object -First 1)
     if ([string]::IsNullOrEmpty($VsPath)) { Stop-Build 'no Visual Studio instance with clang-cl; run scripts\check-prereqs.ps1' }
 }
-$clangCl = Join-Path $VsPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
+$clangCl = if ([string]::IsNullOrEmpty($LlvmRoot)) { Join-Path $VsPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe' } else { Join-Path $LlvmRoot 'bin\clang-cl.exe' }
 if (-not (Test-Path $clangCl)) { Stop-Build "clang-cl not found at $clangCl" }
 $clangVersion = (& $clangCl --version | Select-Object -First 1)
 if ($clangVersion -notmatch 'clang version (\d+)') { Stop-Build "clang version not parsed: $clangVersion" }
@@ -123,7 +134,7 @@ $rc = $LASTEXITCODE
 Write-Phase 'staged libraries'
 $missing = @()
 foreach ($c in $components) {
-    $lib = Join-Path $StageDir "lib\libboost_$c-clangw$clangMajor-mt-s-x64-1_86.lib"
+    $lib = Join-Path $StageDir "lib\libboost_$c-clangw$clangMajor-mt-s-x64-$libVersion.lib"
     if (Test-Path $lib) { Write-Host ("  {0,-70} {1,12:N0} bytes" -f (Split-Path -Leaf $lib), (Get-Item $lib).Length) } else { $missing += (Split-Path -Leaf $lib) }
 }
 if ($rc -ne 0 -or $missing.Count -gt 0) { Stop-Build "b2 exit $rc; missing: $($missing -join ', ')" }

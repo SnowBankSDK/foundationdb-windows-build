@@ -180,6 +180,20 @@ $dockerOk = $false
 if ($docker) { & docker info 2>$null | Out-Null; $dockerOk = ($LASTEXITCODE -eq 0) }
 Add-Check 'Docker (optional)' $dockerOk 'a running Docker engine enables the live-cluster smoke test' -Warn
 
+# The 8.0 branch builds with a standalone LLVM 22.1.7 or later (the Visual Studio clang is too old for its
+# coroutines) and links Boost 1.89.0 built by that clang.
+$llvmClang = 'C:\Program Files\LLVM\bin\clang-cl.exe'
+$llvmVersion = $null
+if (Test-Path $llvmClang) { if ((Get-CommandVersion $llvmClang @('--version')) -match 'clang version (\d+\.\d+\.\d+)') { $llvmVersion = [version] $Matches[1] } }
+$llvmOk = ($null -ne $llvmVersion) -and ($llvmVersion -ge [version]'22.1.7')
+$llvmDetail = if ($null -eq $llvmVersion) { "not found at $llvmClang (winget install LLVM.LLVM)" } else { "clang $llvmVersion at $llvmClang (22.1.7 or later needed)" }
+Add-Check 'LLVM for 8.0 (optional)' $llvmOk $llvmDetail -Warn
+if ($llvmOk) {
+    $tag8 = "clangw$($llvmVersion.Major)"
+    $libs8 = @('filesystem', 'iostreams', 'program_options', 'serialization', 'url' | Where-Object { Test-Path "C:\boost_1_89_0\stage\lib\libboost_$_-$tag8-mt-s-x64-1_89.lib" })
+    Add-Check 'Boost 1.89 for 8.0 (optional)' ($libs8.Count -ge 5) "$($libs8.Count) of 5 libraries tagged $tag8 under C:\boost_1_89_0\stage\lib (build-boost.ps1 -Version 1.89.0 -LlvmRoot 'C:\Program Files\LLVM')" -Warn
+}
+
 $script:rows | Format-Table Check, Status, Detail -AutoSize -Wrap | Out-String -Width 200 | Write-Host
 
 if ($script:failed) {
