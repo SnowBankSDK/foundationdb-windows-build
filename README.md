@@ -2,8 +2,8 @@
 
 Windows client binaries for [FoundationDB](https://github.com/apple/foundationdb): `fdb_c.dll` (the
 client library every binding loads) and `fdbcli.exe`, built from the upstream release tags. Upstream
-publishes Linux and macOS binaries only; this repository fills the Windows gap for the 7.3 and 7.4
-branches, and its releases also carry the macOS clients (arm64 and x86_64), taken unmodified from the
+publishes Linux and macOS binaries only; this repository fills the Windows gap for the 7.3, 7.4 and
+8.0 branches, and its releases also carry the macOS clients (arm64 and x86_64), taken unmodified from the
 upstream macOS packages.
 
 ## Releases
@@ -16,7 +16,9 @@ NuGet package downloads these files by URL and verifies the checksums.
 
 The Windows `fdb_c.dll` is built without TLS support (the TLS initialization is stubbed out) and
 without AVX instructions; it runs on any x64 Windows host. It speaks the wire protocol of its release
-branch (`fdb00b074000000` for 7.4), so a 7.4.x client talks to any 7.4.x cluster.
+branch (`fdb00b074000000` for 7.4, `fdb00b080000000` for 8.0), so a 7.4.x client talks to any 7.4.x
+cluster. From 8.0 on, each binary carries a Windows version resource (file version, product version
+with the source commit).
 
 ## Building
 

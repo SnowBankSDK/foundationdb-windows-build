@@ -1,6 +1,6 @@
 ---
 name: fdb-windows-build
-description: Build, verify and hand off the FoundationDB Windows client binaries (fdb_c.dll, fdbcli.exe) for an upstream release tag with this repository's kit. Use when asked to build FoundationDB for Windows, produce fdb_c.dll or fdbcli.exe for a 7.3.x or 7.4.x tag, rebuild Boost for a new clang, port the Windows patch set to a new tag, verify built binaries, or prepare a release of this repository. Windows host with Visual Studio 2022 only, no Docker needed except for the optional smoke test.
+description: Build, verify and hand off the FoundationDB Windows client binaries (fdb_c.dll, fdbcli.exe) for an upstream release tag with this repository's kit. Use when asked to build FoundationDB for Windows, produce fdb_c.dll or fdbcli.exe for a 7.3.x, 7.4.x or 8.0.x tag, rebuild Boost for a new clang, port the Windows patch set to a new tag, verify built binaries, or prepare a release of this repository. Windows host with Visual Studio 2022 only, no Docker needed except for the optional smoke test.
 ---
 
 # FoundationDB Windows build
@@ -31,6 +31,10 @@ Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one bui
    ```powershell
    .\scripts\build-boost.ps1
    ```
+
+   The 8.0 branch needs LLVM 22.1.7 or later (`winget install LLVM.LLVM`) and Boost 1.89.0 built with it:
+   `.\scripts\build-boost.ps1 -Version 1.89.0 -LlvmRoot 'C:\Program Files\LLVM'`. `CLAUDE.md` section 7
+   explains why the Visual Studio clang is too old for 8.0.
 
 3. Build. Detached, so a lost session does not kill it; follow the log. About six minutes on a 32-thread
    host for the 7.4 branch (configure 67 s, `fdb_c` about 4 min, `fdbcli` 68 s).

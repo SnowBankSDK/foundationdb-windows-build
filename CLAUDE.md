@@ -8,11 +8,13 @@ no Docker and no Linux.
 Follow this file top to bottom. Every step is a script under `scripts\`; run them from the repository
 root in Windows PowerShell 5.1 or PowerShell 7. Nothing here needs administrator rights.
 
-## Two branches
+## Three branches
 
-Application developers pick the 7.3.x or the 7.4.x client package to match their cluster, so both
-branches get a Windows build for every upstream release, on the same recipe (the 7.3 patch set differs,
-`patches\README.md`). Two rules decide which upstream tag to build:
+Application developers pick the 7.3.x, 7.4.x or 8.0.x client package to match their cluster, so every
+branch gets a Windows build for every upstream release. 7.3 and 7.4 share one recipe (the 7.3 patch set
+differs, `patches\README.md`). 8.0 differs in three ways: it needs clang-cl 22.1.7 or later from a
+standalone LLVM install, Boost 1.89.0, and no actor compiler (8.0 replaced the actors with C++20
+coroutines). Two rules decide which upstream tag to build for 7.3 and 7.4:
 
 - **7.3 ships twins.** Every 7.3 release comes as an even (non-AVX) and an odd (AVX) tag of the same
   code, for example 7.3.78 and 7.3.79. Build and publish the even tag: its Linux files run on every
@@ -28,11 +30,12 @@ branches get a Windows build for every upstream release, on the same recipe (the
 |---|---|---|
 | Visual Studio 2022 (Community works) | 17.x, with the "Desktop development with C++" workload, the "C++ Clang tools for Windows" component (clang-cl and the ClangCL MSBuild toolset) and the "vcpkg package manager" component | Visual Studio Installer. One line: `vs_installer.exe modify --installPath "<VS path>" --add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --add Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset --add Microsoft.VisualStudio.Component.Vcpkg --includeRecommended --passive --norestart` |
 | clang-cl | the one Visual Studio ships (19.1.5 with VS 17.14) | part of the component above. The clang major number must equal the tag of the staged Boost libraries (`clangw19` for clang 19), see section 3 |
+| LLVM, 8.0 branch only | 22.1.7 or later (23.1.2 proven) | `winget install LLVM.LLVM`, default path `C:\Program Files\LLVM`. Clang-cl before 22.1.7 miscompiles a `catch` inside a C++20 coroutine (section 7); the Visual Studio 2022 clang is too old for 8.0 |
 | CMake | 3.30.x (3.30.4 proven) | cmake.org installer, on `PATH` |
-| .NET SDK | any supported SDK (8, 9 or 10) | dot.net; builds the actor compiler (`flow\actorcompiler`) |
+| .NET SDK | any supported SDK (8, 9 or 10) | dot.net; builds the actor compiler (`flow\actorcompiler`) of 7.3 and 7.4; 8.0 needs none |
 | Python 3 | 3.10 to 3.12 proven | python.org or the Microsoft Store; `python.exe` on `PATH`; the build uses it for code generation and needs the `jinja2` module or it creates a venv on its own |
 | OpenSSL 3.3.x Win64, static libraries | 3.3.2 proven | the "Win64 OpenSSL v3.3.x" full installer (not the Light one) from slproweb.com, default path `C:\Program Files\OpenSSL-Win64`; the build links `lib\VC\x64\MT\libssl_static.lib` and `libcrypto_static.lib` |
-| Boost | 1.86.0 sources, built by `scripts\build-boost.ps1` | archives.boost.io; default root `C:\boost_1_86_0` |
+| Boost | 1.86.0 for 7.3 and 7.4, 1.89.0 for 8.0, built by `scripts\build-boost.ps1` | archives.boost.io; default root `C:\boost_1_86_0` or `C:\boost_1_89_0` |
 | git | any recent Git for Windows | git-scm.com |
 | 7-Zip | any recent (26.02 proven) | 7-zip.org, default `C:\Program Files\7-Zip\7z.exe`; `fetch-macos-client.ps1` unpacks the upstream macOS packages with it (xar, gzip, cpio) for a release |
 | GitHub CLI (`gh`) | any recent, logged in | cli.github.com; `release-manifest.ps1` reads the release and downloads its assets with it |
@@ -75,7 +78,12 @@ by the same clang major as the FoundationDB build, because CMake's FindBoost loo
 ```powershell
 .\scripts\build-boost.ps1                       # sources and stage under C:\boost_1_86_0
 .\scripts\build-boost.ps1 -BoostRoot D:\boost_1_86_0   # elsewhere: pass the same -BoostRoot to build-fdb.ps1
+.\scripts\build-boost.ps1 -Version 1.89.0 -LlvmRoot 'C:\Program Files\LLVM'   # the 8.0 branch
 ```
+
+The 8.0 branch links five libraries (filesystem, iostreams, program_options, serialization, url): Boost
+1.89 has no `system` library anymore, and the 8.0 Windows build does not link `context`. Build its
+Boost with the same standalone clang that builds 8.0, so the tag matches (`clangw23` for clang 23).
 
 The script downloads and extracts the 1.86.0 sources when they are absent, writes `user-config.jam`
 (clang-cl as the `clang-win` toolset; the archiver stays unset and resolves to the `lib.exe` on the
@@ -93,6 +101,7 @@ steps write their own progressive logs next to it: `actorcompiler.log`, `build-f
 `build-fdbcli.log` (MSBuild buffers its output when piped, so the main log shows a step's tail only
 when the step ends; follow the step log to watch a compile).
 Parameters: `-WorkRoot`, `-SourceDir`, `-OutputDir`, `-LogFile`, `-BoostRoot`, `-OpenSslRoot`, `-VsPath`,
+`-LlvmRoot` (a standalone LLVM install; the 8.0 branch defaults to `C:\Program Files\LLVM`),
 `-ReferenceClone <local clone>` (seeds the clone from a local repository, then dissociates), `-Jobs`,
 `-Rebuild` (deletes the build tree first), `-SkipClone` (builds an existing, already patched checkout).
 
@@ -106,17 +115,21 @@ Get-Content C:\fdb-build\7.4.7\build-7.4.7.log -Wait
 What the script does, in order, with a timestamped `=== phase ===` line for each:
 
 1. Enters the Visual Studio developer environment (clang-cl, lld-link, MSBuild, the Windows SDK) and
-   points `VCPKG_ROOT` at the vcpkg bundled with Visual Studio.
+   points `VCPKG_ROOT` at the vcpkg bundled with Visual Studio. With a standalone LLVM (always for 8.0)
+   it sets `LLVMInstallDir` and `LLVMToolsVersion` in the environment, where MSBuild picks them up for
+   the ClangCL toolset, and it stops when an 8.0 build finds a clang-cl older than 22.1.7.
 2. Clones `apple/foundationdb` and checks out the tag. It refuses a checkout with local changes.
 3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.8.patch`
-   for 7.4.8 and later, `patches\windows-7.4.7.patch` for earlier 7.4 tags, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag. It then
+   for 7.4.8 and later, `patches\windows-7.4.7.patch` for earlier 7.4 tags, `patches\windows-8.0.0.patch`
+   for an 8.0 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag. It then
    tries every `patches\extra\*.patch` and applies the ones that fit. It copies `patches\vcpkg.json` to the
    source root and, when `-BoostRoot` is not the default, rewrites the `BOOST_ROOT` line the patch sets.
 4. Configures with CMake: generator `Visual Studio 17 2022`, platform `x64`, toolset `ClangCL`, the
    vcpkg toolchain file (vcpkg builds zlib 1.3.1 and lz4 1.10.0 from the manifest at this step), C++20,
-   `CMAKE_BUILD_TYPE=Release`. The 7.3 branch adds `/DWIN32 /D_WINDOWS` to `CMAKE_CXX_FLAGS`.
+   `CMAKE_BUILD_TYPE=Release`. The 7.3 branch adds `/DWIN32 /D_WINDOWS` to `CMAKE_CXX_FLAGS`. The 8.0
+   branch passes `WITH_CSHARP=OFF`, so the option headers come from the Python vexillographer.
 5. Builds the actor compiler with `dotnet build` into `build\` (the CMake target that should do it never
-   runs under MSBuild).
+   runs under MSBuild). 7.3 and 7.4 only.
 6. Builds the `fdb_c` and `fdbcli` targets.
 7. Copies `fdb_c.dll` and `fdbcli.exe` to the output directory, writes `<name>.sha256` for each (lowercase
    hex, two spaces, the file name, one line, the `sha256sum` text format) and `build-info.txt` (tag,
@@ -133,10 +146,10 @@ The script stops at the first failure with `BUILD FAILED: <reason>` in the log a
 "Verified" means all four gates pass:
 
 1. `fdbcli --version` reports the tag (`v7.4.7`) and the protocol of the release branch
-   (`fdb00b074000000` for 7.4, `fdb00b073000000` for 7.3).
+   (`fdb00b080000000` for 8.0, `fdb00b074000000` for 7.4, `fdb00b073000000` for 7.3).
 2. The export set of `fdb_c.dll` (from `dumpbin /exports`) equals `reference\exports-<branch>.txt`: 111
-   names, all `fdb_*`, nothing added, nothing removed. A new upstream API adds names; when that is the
-   intent, update the reference file in the same change.
+   names for 7.3 and 7.4, 98 for 8.0, all `fdb_*`, nothing added, nothing removed. A new upstream API
+   adds names; when that is the intent, update the reference file in the same change.
 3. Each `.sha256` file matches its artifact.
 4. Smoke test: with Docker running, the script starts `foundationdb/foundationdb:<tag>` on a local port,
    runs `configure new single memory`, `status minimal` (must report the database available) and a
@@ -202,6 +215,17 @@ them against an older tag (`-Tag 7.4.4 -ArtifactDir <the 7.4.4 drop>`, with `-Ri
 release check) is a safe rehearsal.
 
 ## 7. Known failures and what to do
+
+- **8.0: `fdbcli` exits with 0xC0000005 and prints nothing, or a client crashes when it closes a
+  database.** The binaries were built with a clang-cl older than 22.1.7. Those releases place the catch
+  object of a `try`/`catch` around a `co_await` in the heap coroutine frame, while the MSVC exception
+  tables point at the stack, so the handler reads its `Error&` from uninitialized memory (LLVM issues
+  143235 and 182584, fixed by LLVM pull request 186728 in 22.1.7). Every Flow retry loop has this shape,
+  and no compiler flag avoids it. Install LLVM 22.1.7 or later and rebuild with `-Rebuild`; `build-fdb.ps1`
+  stops an 8.0 build on an older clang-cl.
+- **8.0 with clang 19: one compiler process grows past 40 GB on `fdbcli\fdbcli.cpp`.** Clang 19 cannot
+  optimize the 1,100-line `cli()` coroutine at `/O1` or `/O2`. Clang 23 compiles the file at `/O2` in 13 s
+  with 1.2 GB. Same fix as above: a standalone LLVM 22.1.7 or later.
 
 - **`actorcompiler.exe` missing, or every `.actor.cpp` fails to compile.** The CMake target
   `actorcompiler_build` never runs `dotnet build` under MSBuild. `build-fdb.ps1` builds the actor
@@ -278,11 +302,13 @@ patches\windows-7.3.52.patch   the 7.3 branch patch set (8 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
 patches\windows-7.4.7.patch    the 7.4 patch set up to 7.4.7 (16 files)
 patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (16 files)
+patches\windows-8.0.0.patch    the 8.0 patch set (16 files, one of them new: cmake\WindowsVersionInfo.rc.in)
 patches\extra\*.patch          fixes tried on every tag and applied when they fit
 patches\vcpkg.json             the vcpkg manifest (zlib, lz4, pinned baseline)
 patches\README.md              what each hunk group does and how to port the set to a new tag
 reference\exports-7.3.txt      the 111 exported names of a 7.3 fdb_c.dll
 reference\exports-7.4.txt      the 111 exported names of a 7.4 fdb_c.dll
+reference\exports-8.0.txt      the 98 exported names of an 8.0 fdb_c.dll
 .claude\skills\fdb-windows-build\SKILL.md   the skill a Claude session loads to run this kit
 artifacts\                     build outputs (ignored by git)
 ```
