@@ -1,13 +1,22 @@
 # The Windows patch set
 
 A stock `apple/foundationdb` checkout does not configure or compile on Windows. The patches here make
-CMake target Windows without Swift, build the C# actor compiler out of band, replace POSIX-only code,
-and stub TLS. `scripts\build-fdb.ps1` applies one branch patch by release line, then every patch under
+CMake target Windows without Swift, replace POSIX-only code, and fix Windows-only bugs. For 7.3 and 7.4
+they also build the C# actor compiler out of band and stub TLS. `scripts\build-fdb.ps1` applies one branch
+patch by release line, then its `-common` companion when the branch has one, then every patch under
 `extra\` that still fits.
+
+From 8.0 on, a branch has two patch files:
+
+- `windows-<tag>.patch`: every hunk leaves the code that Linux and macOS compile unchanged (it edits
+  `#ifdef _WIN32` branches, `if(WIN32)` CMake blocks, or Windows-only files). These hunks are candidates
+  for upstream.
+- `windows-<tag>-common.patch`: hunks that must change code shared by every platform. Local only.
 
 | File | Applies to | Files touched |
 |---|---|---|
-| `windows-8.0.0.patch` | 8.0 tags | 16 |
+| `windows-8.0.0.patch` | 8.0 tags | 27 |
+| `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 2 |
 | `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 16 |
 | `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag) | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
@@ -16,46 +25,87 @@ and stub TLS. `scripts\build-fdb.ps1` applies one branch patch by release line, 
 | `extra\knob-status-timeout-source.patch` | tags where `windows.h` is included after the knob header in the two client sources that use the knob (7.3.78 and later 7.3 tags; harmless on 7.4) | 2 |
 | `vcpkg.json` | copied to the source root of every tag | manifest |
 
-## The 8.0 patch
+## The 8.0 patches
 
 8.0 removed the actor compiler (Flow actors are C++20 coroutines), made Swift opt-in, and renamed most
-`.actor.cpp` files. The 8.0 patch keeps the intent of the 7.4 hunks that still apply and adds the fixes
-8.0 needs.
+`.actor.cpp` files. The 8.0 build needs clang-cl 22.1.7 or later and runs the LLVM IR verifier on every
+translation unit (`/clang:-fverify-intermediate-code`, set by `build-fdb.ps1`).
 
-Carried from 7.4, unchanged or moved to the renamed file:
+Build system:
 
-- `CMakeLists.txt`: the `WIN32` block, with `BOOST_ROOT` at `C:/boost_1_89_0` and without
-  `cmake_policy(CMP0167 OLD)` (8.0 finds Boost in config mode). `include(CTest)`, `enable_testing()` and
-  `add_subdirectory(tests)` stay behind `NOT WIN32`, and the `packaging/msi` subdirectory is skipped.
-- `fdbclient/CMakeLists.txt` (`folly_memcpy`), `RandomKeyValueUtils.h` (`uint`), `flow/Hash3.c` (`_WIN32`),
-  `flow/Trace.cpp` (`<chrono>`), `flat_buffers.h` (`<stdexcept>`), `swift.h` (`_tid()`): as in 7.4.
-- `flow/Net2.cpp` (was `Net2.actor.cpp`): the TLS stub. The Windows `fdb_c.dll` does not do TLS.
-- `fdbclient/S3Client_cli.cpp` (was `.actor.cpp`): `#import` to `#include`.
-- `fdbclient/include/fdbclient/Knobs.h` (was `ClientKnobs.h`): `#undef STATUS_TIMEOUT` after the includes.
-- `fdbserver/kvstore/VFSAsync.cpp` (was `fdbserver/VFSAsync.cpp`): `WIN32` to `_WIN32`.
+- `CMakeLists.txt`: the `WIN32` block (Boost at `C:/boost_1_89_0` in config mode, Swift off, the components
+  the client does not need off), `include(CTest)`, `enable_testing()` and `add_subdirectory(tests)` behind
+  `NOT WIN32`, no `packaging/msi`. The block also adds a version resource (`cmake/WindowsVersionInfo.rc.in`,
+  a new file) to `fdb_c.dll` and `fdbcli.exe`: FileVersion, ProductVersion with the source commit,
+  ProductName. The call is deferred to the end of the file, when both targets exist.
+- `cmake/ConfigureCompiler.cmake` and `flow/config.h.cmake`: `_WIN32_WINNT=0x0A00`, `WINVER` and
+  `BOOST_ALL_NO_LIB` on the command line (Windows 10 / Server 2016 minimum). The `config.h` block that set
+  Windows Server 2003 was live only in files that included a Windows or Boost.Asio header first.
+- `fdbclient/CMakeLists.txt`: `folly_memcpy` (Linux assembly) stays off Windows.
 
-Dropped: the actor compiler hunks (`CompileActorCompiler.cmake`, `AssemblyInfo.cs`, the `actorcompiler_build`
-and `TLSConfig.actor.g.cpp` lines in `flow/CMakeLists.txt`), `ActorFuzzUnitTest.cpp` (deleted upstream), the
-documentation hunk (`BUILD_DOCUMENTATION OFF` already turns `WITH_DOCUMENTATION` off), the `FLOW_SRCS` debug
-dump, and the `flow.h` hunk (8.0 no longer includes `pthread.h` there).
+Compile fixes:
 
-New in 8.0:
+- `Platform.h`: no `strtoull` to `_strtoui64` macro (Boost 1.89 Asio calls `std::strtoull`).
+- `Platform.cpp`: `PdhOpenQuery(nullptr, 0, ...)` (the parameter is a `DWORD_PTR`); a Windows
+  `getCachedImageInfo()` for the shared `format_backtrace()`.
+- `UnitTestRunner.cpp`: `<direct.h>` and `<process.h>` for `chdir` and `getpid`.
+- `Hash3.c`, `VFSAsync.cpp`: `WIN32` to `_WIN32`. `Trace.cpp`: `<chrono>`. `flat_buffers.h`: `<stdexcept>`
+  under `_WIN32`. `Knobs.h`: `#undef STATUS_TIMEOUT` after the includes. `swift.h`: no `_tid()` on Windows
+  (no caller, and `GetCurrentThreadId` pulled `<windows.h>` into every file).
 
-- `flow/include/flow/Platform.h`: removes the `strtoull` to `_strtoui64` macro. Boost 1.89 Asio calls
-  `std::strtoull`, which the macro turned into the undeclared `std::_strtoui64`.
-- `flow/Platform.cpp`: `PdhOpenQuery(nullptr, 0, ...)`, because the second parameter is an integer
-  (`DWORD_PTR`); `format_backtrace` calls `getImageInfo()`, because `getCachedImageInfo()` exists only on
-  Unix.
-- `flow/UnitTestRunner.cpp` (new upstream): includes `<direct.h>` and `<process.h>` on Windows for `chdir`
-  and `getpid`.
-- `flow/include/flow/singleton.h`: `WIN32` to `_WIN32` on the `<Windows.h>` include, which the `_WIN32`
-  mutex guard below it needs.
-- `CMakeLists.txt` and the new `cmake/WindowsVersionInfo.rc.in`: a version resource on `fdb_c.dll` and
-  `fdbcli.exe` (FileVersion, ProductVersion with the source commit, ProductName). The `WIN32` block defers
-  the call to the end of the file, when both targets exist.
+Bug fixes (Windows code paths that upstream never ran):
 
-The 8.0 patch adds one file, so save it with `git add -N cmake/WindowsVersionInfo.rc.in` before
-`git diff > patches\windows-<tag>.patch`.
+- `singleton.h`: the Windows lock created a new kernel mutex per use, so it excluded nothing and leaked a
+  handle each time. Every platform now uses `std::mutex`.
+- `Tracing.cpp`: `network_lossy` deleted the tracer without creating a new one on Windows (use after free).
+  It now falls back to the no-op tracer with a `NetworkLossyTracerUnsupported` warning.
+- `Platform.cpp` `startThread`/`waitThread`: `_beginthreadex` and `CloseHandle` (the C runtime closes a
+  `_beginthread` handle at thread exit, so the join could wait on a recycled handle); thread names through
+  `SetThreadDescription`; an escaped exception is reported as on Linux.
+- `FileTraceLogWriter.cpp`: trace files opened with `_O_BINARY | _O_NOINHERIT` (LF line endings, exact roll
+  size, no handle inherited by child processes).
+- `Platform.cpp` `getMachineRAMInfo`: `AvailableMemory` is `ullAvailPhys` instead of total RAM minus the
+  commit charge, which under-reported and could go negative.
+- `SpecialKeySpace.cpp`: the actor-lineage time parser always failed on Windows (`std::get_time` has no `%F`
+  or `%z` there) and never set its result.
+- `AsyncFileWinASIO.h`: the atomic-write rename uses `MoveFileExA` with `MOVEFILE_REPLACE_EXISTING` and
+  reports a failure instead of ignoring it.
+- `Platform.h`: 32-bit `clz`/`ctz` returned 63-based values and 64 for zero.
+- `Platform.cpp`: wall clock from `GetSystemTimePreciseAsFileTime` (1 to 15.6 ms steps before).
+
+Robustness and cleanup:
+
+- `Net2.cpp`, `FastAlloc.cpp`, `AsyncFileWinASIO.h`, `Tracing.cpp`, `DatabaseContext.cpp`, `NativeAPI.cpp`:
+  `WIN32` to `_WIN32`. Without `/DWIN32`, `WIN32` exists only after the SDK's `minwindef.h` or Boost.Asio
+  was included, so these tests depended on include order (`Net2`'s `timeBeginPeriod(1)` among them).
+- Removed: `_set_FMA3_enable(0)` (a VS 2013 workaround that turned off the FMA3 math paths of the C runtime
+  for the whole process), the VS 2010 version guard, the MSVC branch of `DISABLE_ZERO_DIVISION_FLAG`, and
+  the `_vscprintf` size fallback in `flow.cpp` (the C runtime's `vsnprintf` has returned the size since VS 2015).
+
+clang-cl workaround: clang-cl up to at least 23.1.2 builds invalid exception-handling code for some
+coroutines at `/O1` and above (LLVM issue 226735: a catch funclet with two unwind destinations, or a value
+used before its definition). At run time the unwinder runs the cleanup of a scope that was never entered:
+every failed connection crashed the client in `connectionKeeper`. The patch turns optimization off, on
+Windows clang only, around the affected code: `connectionKeeper` (`FlowTransport.cpp`), the `UDPSocket`
+class (`Net2.cpp`), the range-read coroutines from `getExactRange` to `getRangeStreamImpl` (`NativeAPI.cpp`),
+`BackupRangeTaskFunc` (`FileBackupAgent.cpp`) and `copyDownFile` (`S3Client.cpp`). A range-read benchmark
+shows no difference with and without these regions. The IR verifier in the build names any new function
+in this state; wrap it the same way.
+
+TLS: the 7.3 and 7.4 TLS stub is gone. The 8.0 Windows client connects to TLS clusters with the usual
+`TLS_CERT_PATH`, `TLS_KEY_PATH` and `TLS_CA_PATH` options; a missing or untrusted certificate times out
+like on Linux.
+
+Common patch: `RandomKeyValueUtils.h` (`uint` to `unsigned int`) and `S3Client_cli.cpp` (`#import` to
+`#include`). Neither file is part of `fdb_c.dll` or `fdbcli.exe`.
+
+Saving the 8.0 patches from a patched checkout (the first patch adds a file, hence `git add -N`):
+
+```
+git add -N cmake/WindowsVersionInfo.rc.in
+git diff -- fdbclient/include/fdbclient/RandomKeyValueUtils.h fdbclient/S3Client_cli.cpp > windows-8.0.0-common.patch
+git diff -- . ":(exclude)fdbclient/include/fdbclient/RandomKeyValueUtils.h" ":(exclude)fdbclient/S3Client_cli.cpp" > windows-8.0.0.patch
+```
 
 ## The 7.4.8 port
 

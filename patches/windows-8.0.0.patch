@@ -94,6 +94,23 @@ index 8324d10c31..dbe2a43f47 100644
    include(CPack)
  endif()
  
+diff --git a/cmake/ConfigureCompiler.cmake b/cmake/ConfigureCompiler.cmake
+index 31bec6634e..85d881e820 100644
+--- a/cmake/ConfigureCompiler.cmake
++++ b/cmake/ConfigureCompiler.cmake
+@@ -147,8 +147,10 @@ endif()
+ 
+ if(WIN32)
+   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
+-  # this sets the windows target version to Windows Server 2003
+-  set(WINDOWS_TARGET 0x0502)
++  # Windows 10 / Windows Server 2016 is the minimum. The definitions go on the command line, so every
++  # file sees the same target before its first Windows or Boost.Asio header.
++  set(WINDOWS_TARGET 0x0A00)
++  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
+   if(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
+     # TODO: This doesn't seem to be good style, but I couldn't find a better way so far
+     string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 diff --git a/cmake/WindowsVersionInfo.rc.in b/cmake/WindowsVersionInfo.rc.in
 new file mode 100644
 index 0000000000..1617c6de2d
@@ -144,19 +161,197 @@ index fd7252768c..8252b4c3a0 100644
      target_link_libraries(s3client PRIVATE folly_memcpy)
  endif()
  
-diff --git a/fdbclient/S3Client_cli.cpp b/fdbclient/S3Client_cli.cpp
-index be988ad23b..361b4b86f0 100644
---- a/fdbclient/S3Client_cli.cpp
-+++ b/fdbclient/S3Client_cli.cpp
-@@ -31,7 +31,7 @@
+diff --git a/fdbclient/DatabaseContext.cpp b/fdbclient/DatabaseContext.cpp
+index 134341154c..383dab98a8 100644
+--- a/fdbclient/DatabaseContext.cpp
++++ b/fdbclient/DatabaseContext.cpp
+@@ -68,7 +68,7 @@
+ #include <sanitizer/lsan_interface.h>
  #endif
  
- #include "fdbclient/BuildFlags.h"
--#import "fdbclient/BackupTLSConfig.h"
-+#include "fdbclient/BackupTLSConfig.h"
- #include "fdbclient/Knobs.h"
- #include "fdbclient/NativeAPI.h"
- #include "fdbclient/versions.h"
+-#ifdef WIN32
++#ifdef _WIN32
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ #undef min
+diff --git a/fdbclient/FileBackupAgent.cpp b/fdbclient/FileBackupAgent.cpp
+index d9751ea004..83268cb06e 100644
+--- a/fdbclient/FileBackupAgent.cpp
++++ b/fdbclient/FileBackupAgent.cpp
+@@ -1940,6 +1940,13 @@ static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYour
+ 	co_return results;
+ }
+ 
++#if defined(_WIN32) && defined(__clang__)
++// clang-cl (23.1.2 and earlier) builds invalid exception-handling code for coroutines such as this one
++// at /O1 and above: a catch funclet ends up with two unwind destinations, or a value used before it is
++// defined (LLVM issue 226735). At run time the unwinder then runs the cleanup of a scope that was never
++// entered. Optimization stays off here until the Windows build requires a fixed clang-cl.
++#pragma clang optimize off
++#endif
+ struct BackupRangeTaskFunc : BackupTaskFuncBase {
+ 	static StringRef name;
+ 	static constexpr uint32_t version = 1;
+@@ -2304,6 +2311,9 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
+ 		co_return;
+ 	}
+ };
++#if defined(_WIN32) && defined(__clang__)
++#pragma clang optimize on
++#endif
+ StringRef BackupRangeTaskFunc::name = "file_backup_write_range_5.2"_sr;
+ REGISTER_TASKFUNC(BackupRangeTaskFunc);
+ 
+diff --git a/fdbclient/NativeAPI.cpp b/fdbclient/NativeAPI.cpp
+index 8dd78c6f95..16fd3f5f91 100644
+--- a/fdbclient/NativeAPI.cpp
++++ b/fdbclient/NativeAPI.cpp
+@@ -105,7 +105,7 @@
+ #include <sanitizer/lsan_interface.h>
+ #endif
+ 
+-#ifdef WIN32
++#ifdef _WIN32
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ #undef min
+@@ -2334,6 +2334,13 @@ PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::* getRang
+ 	}
+ }
+ 
++#if defined(_WIN32) && defined(__clang__)
++// clang-cl (23.1.2 and earlier) builds invalid exception-handling code for coroutines such as these
++// at /O1 and above: a catch funclet ends up with two unwind destinations, or a value used before it is
++// defined (LLVM issue 226735). At run time the unwinder then runs the cleanup of a scope that was never
++// entered. Optimization stays off here until the Windows build requires a fixed clang-cl.
++#pragma clang optimize off
++#endif
+ template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trStateInput,
+                                         KeyRange keysInput,
+@@ -3462,6 +3469,9 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
+ 		}
+ 	}
+ }
++#if defined(_WIN32) && defined(__clang__)
++#pragma clang optimize on
++#endif
+ 
+ Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
+                                                           KeyRange keys,
+diff --git a/fdbclient/S3Client.cpp b/fdbclient/S3Client.cpp
+index 81205a235e..0265445994 100644
+--- a/fdbclient/S3Client.cpp
++++ b/fdbclient/S3Client.cpp
+@@ -807,6 +807,13 @@ static AsyncResult<Optional<std::string>> getExpectedChecksum(Reference<S3BlobSt
+ 	co_return result;
+ }
+ 
++#if defined(_WIN32) && defined(__clang__)
++// clang-cl (23.1.2 and earlier) builds invalid exception-handling code for coroutines such as this one
++// at /O1 and above: a catch funclet ends up with two unwind destinations, or a value used before it is
++// defined (LLVM issue 226735). At run time the unwinder then runs the cleanup of a scope that was never
++// entered. Optimization stays off here until the Windows build requires a fixed clang-cl.
++#pragma clang optimize off
++#endif
+ // Copy down file from s3 to filepath.
+ static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
+                                  std::string bucket,
+@@ -992,6 +999,9 @@ static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
+ 		}
+ 	}
+ }
++#if defined(_WIN32) && defined(__clang__)
++#pragma clang optimize on
++#endif
+ 
+ Future<Void> copyDownFile(std::string s3url, std::string filepath) {
+ 	TraceEvent(SevDebug, "S3ClientCopyDownFileWrapperStart").detail("S3URL", s3url).detail("FilePath", filepath);
+diff --git a/fdbclient/SpecialKeySpace.cpp b/fdbclient/SpecialKeySpace.cpp
+index 44f548afae..6dbcf74592 100644
+--- a/fdbclient/SpecialKeySpace.cpp
++++ b/fdbclient/SpecialKeySpace.cpp
+@@ -2234,17 +2234,39 @@ void parse(StringRef& val, WaitState& w) {
+ void parse(StringRef& val, time_t& t) {
+ 	struct tm tm;
+ #ifdef _WIN32
++	// The MSVC std::get_time has no %F, %T or %z, so the date and time are read with explicit fields and
++	// the offset (Z, +HHMM or +HH:MM, as strptime %z reads it) by hand.
++	tm = {};
+ 	std::istringstream s(val.toString());
+-	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
+-	s >> std::get_time(&tm, "%FT%T%z");
++	s >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+ 	if (s.fail()) {
+ 		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+ 	}
+-	long timezone;
+-	if (_get_timezone(&timezone) != 0) {
++	long timezone = 0;
++	int sign = s.get();
++	if (sign == '+' || sign == '-') {
++		std::string digits;
++		for (int c = s.get(); c != EOF; c = s.get()) {
++			if (c != ':') {
++				digits.push_back((char)c);
++			}
++		}
++		if (digits.size() != 4 || !isdigit(digits[0]) || !isdigit(digits[1]) || !isdigit(digits[2]) ||
++		    !isdigit(digits[3])) {
++			throw std::invalid_argument("failed to parse ISO 8601 datetime");
++		}
++		timezone = ((digits[0] - '0') * 10 + (digits[1] - '0')) * 3600 + ((digits[2] - '0') * 10 + (digits[3] - '0')) * 60;
++		if (sign == '-') {
++			timezone = -timezone;
++		}
++	} else if (sign != 'Z') {
++		throw std::invalid_argument("failed to parse ISO 8601 datetime");
++	}
++	t = _mkgmtime(&tm);
++	if (t == -1) {
+ 		throw std::runtime_error("failed to convert ISO 8601 datetime");
+ 	}
+-	timezone = -timezone;
++	t -= timezone;
+ #else
+ 	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
+ 		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+diff --git a/fdbclient/Tracing.cpp b/fdbclient/Tracing.cpp
+index f7ad960a6d..5e61f8dda2 100644
+--- a/fdbclient/Tracing.cpp
++++ b/fdbclient/Tracing.cpp
+@@ -225,7 +225,7 @@ private:
+ 	}
+ };
+ 
+-#ifndef WIN32
++#ifndef _WIN32
+ Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
+ 	bool sendErrorReset = false;
+ 
+@@ -349,8 +349,12 @@ void openTracer(TracerType type) {
+ 		g_tracer = new LogfileTracer{};
+ 		break;
+ 	case TracerType::NETWORK_LOSSY:
+-#ifndef WIN32
++#ifndef _WIN32
+ 		g_tracer = new FastUDPTracer{};
++#else
++		// FastUDPTracer sends with POSIX socket calls and has no Windows implementation.
++		TraceEvent(SevWarnAlways, "NetworkLossyTracerUnsupported").detail("Fallback", "disabled");
++		g_tracer = new NoopTracer{};
+ #endif
+ 		break;
+ 	case TracerType::SIM_END:
+@@ -619,7 +623,7 @@ std::string readMPString(uint8_t* index) {
+ }
+ 
+ // Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
+-#ifndef WIN32
++#ifndef _WIN32
+ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
+ 	Span span1("encoded_span"_loc);
+ 	auto request = MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 diff --git a/fdbclient/include/fdbclient/Knobs.h b/fdbclient/include/fdbclient/Knobs.h
 index 0789b861ef..6e6a742cad 100644
 --- a/fdbclient/include/fdbclient/Knobs.h
@@ -173,19 +368,65 @@ index 0789b861ef..6e6a742cad 100644
  FDB_BOOLEAN_PARAM(Randomize);
  FDB_BOOLEAN_PARAM(IsSimulated);
  
-diff --git a/fdbclient/include/fdbclient/RandomKeyValueUtils.h b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
-index e0ad845db6..4690599500 100644
---- a/fdbclient/include/fdbclient/RandomKeyValueUtils.h
-+++ b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
-@@ -223,7 +223,7 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
- 		int inserts = 0;
- 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
- 		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
--		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
-+		const unsigned int maxInsertTry = 3 * indexGenerator.max + (((sizeof(unsigned int) * 8) - clz(indexGenerator.max)) * 100);
- 		while (uniqueKeys.size() < indexGenerator.max) {
- 			auto k = keyGen.next();
- 			uniqueKeys.insert(k);
+diff --git a/fdbrpc/AsyncFileWinASIO.h b/fdbrpc/AsyncFileWinASIO.h
+index f91aff4c87..acd0007922 100644
+--- a/fdbrpc/AsyncFileWinASIO.h
++++ b/fdbrpc/AsyncFileWinASIO.h
+@@ -20,7 +20,7 @@
+ 
+ #pragma once
+ 
+-#ifdef WIN32
++#ifdef _WIN32
+ 
+ #define Net2AsyncFile AsyncFileWinASIO
+ 
+@@ -180,8 +180,15 @@ public:
+ 
+ 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
+ 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
+-			// FIXME: MoveFileEx(..., MOVEFILE_WRITE_THROUGH) in thread?
+-			MoveFile((filename + ".part").c_str(), filename.c_str());
++			// FIXME: MoveFileEx in a worker thread?
++			// MoveFile fails when the target exists, so REPLACE_EXISTING gives the rename() semantics of the
++			// other platforms; a failed rename must not report a committed file.
++			if (!MoveFileExA((filename + ".part").c_str(),
++			                 filename.c_str(),
++			                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
++				TraceEvent(SevError, "AsyncFileAtomicRenameError").detail("File", filename).GetLastError();
++				throw io_error();
++			}
+ 		}
+ 
+ 		return Void();
+diff --git a/fdbrpc/FlowTransport.cpp b/fdbrpc/FlowTransport.cpp
+index 9ff435dd97..0c33d76838 100644
+--- a/fdbrpc/FlowTransport.cpp
++++ b/fdbrpc/FlowTransport.cpp
+@@ -883,6 +883,13 @@ Future<Void> delayedHealthUpdate(HealthMonitor* healthMonitor, NetworkAddress ad
+ 	}
+ }
+ 
++#if defined(_WIN32) && defined(__clang__)
++// clang-cl (23.1.2 and earlier) builds invalid exception-handling code for coroutines such as this one
++// at /O1 and above: a catch funclet ends up with two unwind destinations, or a value used before it is
++// defined (LLVM issue 226735). At run time the unwinder then runs the cleanup of a scope that was never
++// entered. Optimization stays off here until the Windows build requires a fixed clang-cl.
++#pragma clang optimize off
++#endif
+ Future<Void> connectionKeeper(Reference<Peer> self,
+                               Reference<IConnection> conn = Reference<IConnection>(),
+                               Future<Void> reader = Void()) {
+@@ -1192,6 +1199,9 @@ Future<Void> connectionKeeper(Reference<Peer> self,
+ 		}
+ 	}
+ }
++#if defined(_WIN32) && defined(__clang__)
++#pragma clang optimize on
++#endif
+ 
+ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
+   : transport(transport), destination(destination), compatible(true), connected(false), outgoingConnectionIdle(true),
 diff --git a/fdbserver/kvstore/VFSAsync.cpp b/fdbserver/kvstore/VFSAsync.cpp
 index 103dfed5d7..053df23703 100644
 --- a/fdbserver/kvstore/VFSAsync.cpp
@@ -199,6 +440,44 @@ index 103dfed5d7..053df23703 100644
  	_ReadWriteBarrier();
  #else
  	__sync_synchronize();
+diff --git a/flow/FastAlloc.cpp b/flow/FastAlloc.cpp
+index 0bb1e4c815..ede372a4b6 100644
+--- a/flow/FastAlloc.cpp
++++ b/flow/FastAlloc.cpp
+@@ -33,7 +33,7 @@
+ #include <thread>
+ #include <unordered_map>
+ 
+-#ifdef WIN32
++#ifdef _WIN32
+ #include <windows.h>
+ #undef min
+ #undef max
+@@ -610,7 +610,7 @@ void FastAllocator<Size>::getMagazine() {
+ 
+ 	void** block = nullptr;
+ #if FAST_ALLOCATOR_DEBUG
+-#ifdef WIN32
++#ifdef _WIN32
+ 	static int alt = 0;
+ 	alt++;
+ 	block = (void**)VirtualAllocEx(GetCurrentProcess(),
+diff --git a/flow/FileTraceLogWriter.cpp b/flow/FileTraceLogWriter.cpp
+index 8414361476..79269ae2c7 100644
+--- a/flow/FileTraceLogWriter.cpp
++++ b/flow/FileTraceLogWriter.cpp
+@@ -41,7 +41,10 @@
+ #define __write _write
+ #define __close _close
+ #define __fsync _commit
+-#define TRACEFILE_FLAGS _O_WRONLY | _O_CREAT | _O_EXCL
++// _O_BINARY keeps the LF line endings of the other platforms (text mode writes CRLF and makes the roll
++// size undercount the file). _O_NOINHERIT is the counterpart of O_CLOEXEC: a child process must not keep
++// the trace file open, or the rename of a partial trace file fails.
++#define TRACEFILE_FLAGS _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY | _O_NOINHERIT
+ #define TRACEFILE_MODE _S_IWRITE
+ #endif
+ 
 diff --git a/flow/Hash3.c b/flow/Hash3.c
 index fc3d26ef1f..73735e36ca 100644
 --- a/flow/Hash3.c
@@ -213,44 +492,94 @@ index fc3d26ef1f..73735e36ca 100644
  #define HASH_BIG_ENDIAN 0
  #else
 diff --git a/flow/Net2.cpp b/flow/Net2.cpp
-index a36ee5c586..0363e919f1 100644
+index a36ee5c586..69c00c0980 100644
 --- a/flow/Net2.cpp
 +++ b/flow/Net2.cpp
-@@ -1395,6 +1395,8 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
- 	updateNow();
- }
+@@ -70,7 +70,7 @@
+ #include <sanitizer/lsan_interface.h>
+ #endif
  
-+#if _WIN32
-+#else
- static Future<Void> reloadCertificatesOnChange(
-     TLSConfig config,
-     std::function<void()> onPolicyFailure,
-@@ -1442,8 +1444,12 @@ static Future<Void> reloadCertificatesOnChange(
- 		}
+-#ifdef WIN32
++#ifdef _WIN32
+ #include <mmsystem.h>
+ #endif
+ #include "flow/CoroUtils.h"
+@@ -640,6 +640,13 @@ public:
  	}
- }
+ };
+ 
++#if defined(_WIN32) && defined(__clang__)
++// clang-cl (23.1.2 and earlier) builds invalid exception-handling code for coroutines such as this one
++// at /O1 and above: a catch funclet ends up with two unwind destinations, or a value used before it is
++// defined (LLVM issue 226735). At run time the unwinder then runs the cleanup of a scope that was never
++// entered. Optimization stays off here until the Windows build requires a fixed clang-cl.
++#pragma clang optimize off
++#endif
+ class UDPSocket : public IUDPSocket, ReferenceCounted<UDPSocket> {
+ 	UID id;
+ 	Optional<NetworkAddress> toAddress;
+@@ -787,6 +794,9 @@ private:
+ 		platform::setCloseOnExec(socket.native_handle());
+ 	}
+ };
++#if defined(_WIN32) && defined(__clang__)
++#pragma clang optimize on
 +#endif
  
- void Net2::initTLS(ETLSInitState targetState) {
-+#if _WIN32
-+	return;
-+#else
- 	if (tlsInitializedState >= targetState) {
- 		return;
- 	}
-@@ -1508,6 +1514,7 @@ void Net2::initTLS(ETLSInitState targetState) {
- 	}
+ class Listener final : public IListener, ReferenceCounted<Listener> {
+ 	boost::asio::io_context& io_service;
+@@ -1568,7 +1578,7 @@ void Net2::run() {
  
- 	tlsInitializedState = targetState;
-+#endif
- }
+ 	unsigned int tasksSinceReact = 0;
  
- Future<Void> Net2::logTimeOffset() {
+-#ifdef WIN32
++#ifdef _WIN32
+ 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
+ 		TraceEvent(SevError, "TimeBeginPeriodError").log();
+ #endif
+@@ -1769,7 +1779,7 @@ void Net2::run() {
+ 	// Emit at least one batch of counters, for manual inspection.
+ 	simpleCounterReport();
+ 
+-#ifdef WIN32
++#ifdef _WIN32
+ 	timeEndPeriod(1);
+ #endif
+ } // Net2::run
 diff --git a/flow/Platform.cpp b/flow/Platform.cpp
-index 2fbdafdfc4..5fd7820042 100644
+index 2fbdafdfc4..8e71bdb7ea 100644
 --- a/flow/Platform.cpp
 +++ b/flow/Platform.cpp
-@@ -1584,7 +1584,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
+@@ -70,7 +70,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
+ #include <conio.h>
+ #include <direct.h>
+ #include <io.h>
+-#include <math.h> // For _set_FMA3_enable workaround in platformInit
+ #include <pdh.h>
+ #include <pdhmsg.h>
+ #include <processenv.h>
+@@ -576,15 +575,12 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
+ 		throw platform_error();
+ 	}
+ 
+-	PERFORMACE_INFORMATION perf;
+-	if (!GetPerformanceInfo(&perf, sizeof(perf))) {
+-		TraceEvent(SevError, "WindowsGetMemPerformanceInfo").GetLastError();
+-		throw platform_error();
+-	}
+-
++	// The commit charge also counts pagefile-backed and untouched memory, so "total minus commit charge"
++	// under-reports, and goes negative under memory pressure. ullAvailPhys is the Windows counterpart of
++	// MemAvailable on Linux, and committed follows the Linux definition.
+ 	memInfo.total = mem_status.ullTotalPhys;
+-	memInfo.committed = perf.PageSize * perf.CommitTotal;
+-	memInfo.available = memInfo.total - memInfo.committed;
++	memInfo.available = mem_status.ullAvailPhys;
++	memInfo.committed = memInfo.total - memInfo.available;
+ #elif defined(__APPLE__)
+ 	vm_statistics_data_t vm_stat;
+ 	vm_size_t pagesize;
+@@ -1584,7 +1580,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
  		initPdhStrings(*statState, dataFolder);
  
  		TraceEvent("SetupQuery").log();
@@ -259,15 +588,109 @@ index 2fbdafdfc4..5fd7820042 100644
  
  		if (!(*statState)->pdhStrings.diskDevice.empty()) {
  			handlePdhStatus(
-@@ -3521,7 +3521,7 @@ std::string get_backtrace() {
+@@ -1802,7 +1798,7 @@ struct OffsetTimer {
  
- namespace platform {
- std::string format_backtrace(void** addresses, int numAddresses) {
--	ImageInfo const& imageInfo = getCachedImageInfo();
-+	ImageInfo const& imageInfo = getImageInfo();
+ 		offset = 0;
+ 		double timer = now();
+-		GetSystemTimeAsFileTime(&fileTime);
++		GetSystemTimePreciseAsFileTime(&fileTime);
+ 		static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
+ 		offset = (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9 - timer;
+ 	}
+@@ -1879,7 +1875,7 @@ double timer() {
+ 	    11644473600LL *
+ 	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
+ 	FILETIME fileTime;
+-	GetSystemTimeAsFileTime(&fileTime);
++	GetSystemTimePreciseAsFileTime(&fileTime);
+ 	static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
+ 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9;
+ #elif defined(__linux__) || defined(__FreeBSD__)
+@@ -1901,7 +1897,7 @@ uint64_t timer_int() {
+ 	    11644473600LL *
+ 	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
+ 	FILETIME fileTime;
+-	GetSystemTimeAsFileTime(&fileTime);
++	GetSystemTimePreciseAsFileTime(&fileTime);
+ 	static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
+ 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH);
+ #elif defined(__linux__) || defined(__FreeBSD__)
+@@ -2879,8 +2875,43 @@ void setCloseOnExec(int fd) {
+ } // namespace platform
  
- 	std::string s;
- #if defined(_WIN32)
+ #ifdef _WIN32
++
++// The C runtime closes the handle of a _beginthread thread when the thread exits, so a later
++// waitThread() could wait on a closed or recycled handle. _beginthreadex returns a handle that stays
++// valid until waitThread() closes it. The wrapper names the thread and reports an escaped exception,
++// like runFunc does on the other platforms.
++namespace {
++struct ThreadCreateArgs {
++	void (*func)(void*);
++	void* arg;
++	std::wstring name;
++};
++
++unsigned __stdcall runFunc(void* a) {
++	std::unique_ptr<ThreadCreateArgs> args(static_cast<ThreadCreateArgs*>(a));
++	if (!args->name.empty()) {
++		SetThreadDescription(GetCurrentThread(), args->name.c_str());
++	}
++	try {
++		args->func(args->arg);
++	} catch (std::exception& e) {
++		fprintf(stderr, "A side thread raised std::exception [%s]\n", e.what());
++		_exit(1);
++	}
++	return 0;
++}
++} // namespace
++
+ THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const char* name) {
+-	return (void*)_beginthread(func, stackSize, arg);
++	// Thread names are ASCII, so widening each char is enough for SetThreadDescription.
++	auto* args = new ThreadCreateArgs{ func, arg, name ? std::wstring(name, name + strlen(name)) : std::wstring() };
++	uintptr_t thread = _beginthreadex(nullptr, stackSize, &runFunc, args, 0, nullptr);
++	if (thread == 0) {
++		delete args;
++		// Callers transfer thread-owned state without a failed-launch recovery path.
++		criticalError(FDB_EXIT_ERROR, "ThreadCreationError", strerror(errno));
++	}
++	return reinterpret_cast<THREAD_HANDLE>(thread);
+ }
+ #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+ 
+@@ -2964,6 +2995,7 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const
+ void waitThread(THREAD_HANDLE thread) {
+ #ifdef _WIN32
+ 	WaitForSingleObject(thread, INFINITE);
++	CloseHandle(thread);
+ #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+ 	pthread_join(thread, nullptr);
+ #else
+@@ -3455,6 +3487,10 @@ std::string get_backtrace() {
+ ImageInfo getImageInfo() {
+ 	return ImageInfo();
+ }
++// format_backtrace() names the image through getCachedImageInfo(), which the unix branch defines.
++ImageInfo getCachedImageInfo() {
++	return ImageInfo();
++}
+ } // namespace platform
+ #else
+ #include <dlfcn.h>
+@@ -3698,11 +3734,6 @@ std::string exePath() {
+ }
+ 
+ void platformInit() {
+-#ifdef WIN32
+-	_set_FMA3_enable(
+-	    0); // Workaround for VS 2013 code generation bug. See
+-	        // https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
+-#endif
+ #ifdef __linux__
+ 	struct timespec ts;
+ 	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
 diff --git a/flow/Trace.cpp b/flow/Trace.cpp
 index 8c3bf1c8cd..31f712c243 100644
 --- a/flow/Trace.cpp
@@ -294,11 +717,72 @@ index a93e724e14..e39674d0d3 100644
  #endif
  
  namespace {
+diff --git a/flow/config.h.cmake b/flow/config.h.cmake
+index cad9c61186..1610ebdae4 100644
+--- a/flow/config.h.cmake
++++ b/flow/config.h.cmake
+@@ -7,12 +7,6 @@
+ #cmakedefine OPEN_FOR_IDE
+ #define FDB_SOURCE_DIR "${CMAKE_SOURCE_DIR}"
+ #define FDB_BINARY_DIR "${CMAKE_BINARY_DIR}"
+-#ifdef WIN32
+-# define _WIN32_WINNT ${WINDOWS_TARGET}
+-# define WINVER ${WINDOWS_TARGET}
+-# define NTDDI_VERSION 0x05020000
+-# define BOOST_ALL_NO_LIB
+-#else
+ # cmakedefine USE_ASAN
+ # cmakedefine USE_MSAN
+ # cmakedefine USE_UBSAN
+@@ -31,4 +25,3 @@
+ # cmakedefine DTRACE_PROBES
+ # cmakedefine HAS_ALIGNED_ALLOC
+ # cmakedefine USE_JEMALLOC
+-#endif // WIN32
+diff --git a/flow/flow.cpp b/flow/flow.cpp
+index 605691bbef..811e34a493 100644
+--- a/flow/flow.cpp
++++ b/flow/flow.cpp
+@@ -269,14 +269,6 @@ int vsformat(std::string& outputString, const char* form, va_list args) {
+ 		return size;
+ 	}
+ 
+-#ifdef _WIN32
+-	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary
+-	// size
+-	va_copy(args2, args);
+-	size = _vscprintf(form, args2);
+-	va_end(args2);
+-#endif
+-
+ 	if (size < 0) {
+ 		return -1;
+ 	}
 diff --git a/flow/include/flow/Platform.h b/flow/include/flow/Platform.h
-index 3a2bf7e018..92bb4aaf7e 100644
+index 3a2bf7e018..1d5f35c423 100644
 --- a/flow/include/flow/Platform.h
 +++ b/flow/include/flow/Platform.h
-@@ -727,10 +727,6 @@ inline static void flushOutputStreams() {
+@@ -70,10 +70,6 @@
+ #endif
+ #endif
+ 
+-#if defined(_WIN32) && (_MSC_VER < 1600)
+-#error Visual Studio 2010 required on this platform
+-#endif
+-
+ #if defined(__APPLE__) &&                                                                                              \
+     (!((__clang__ == 1) || ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 40800)))
+ #error Either Clang or GCC 4.8.0 or later required on this platform
+@@ -81,8 +77,6 @@
+ 
+ #if (__clang__ == 1)
+ #define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdivision-by-zero\"")
+-#elif defined(_MSC_VER)
+-#define DISABLE_ZERO_DIVISION_FLAG __pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
+ #else
+ #define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
+ #endif
+@@ -727,10 +721,6 @@ inline static void flushOutputStreams() {
  #define DEFAULT_CONSTRUCTORS(X)
  #endif
  
@@ -309,38 +793,99 @@ index 3a2bf7e018..92bb4aaf7e 100644
  #if defined(_MSC_VER)
  inline static void* aligned_alloc(size_t alignment, size_t size) {
  	return _aligned_malloc(size, alignment);
+@@ -797,14 +787,14 @@ inline static int ctz(uint32_t value) {
+ 	if (_BitScanForward(&count, value)) {
+ 		return count;
+ 	}
+-	return 64;
++	return 32;
+ }
+ inline static int clz(uint32_t value) {
+ 	unsigned long count = 0;
+ 	if (_BitScanReverse(&count, value)) {
+-		return 63 - count;
++		return 31 - count;
+ 	}
+-	return 64;
++	return 32;
+ }
+ #else
+ #define ctzll __builtin_ctzll
 diff --git a/flow/include/flow/flat_buffers.h b/flow/include/flow/flat_buffers.h
-index e27deb998f..7076845c25 100644
+index e27deb998f..c965ed9556 100644
 --- a/flow/include/flow/flat_buffers.h
 +++ b/flow/include/flow/flat_buffers.h
-@@ -40,6 +40,9 @@
+@@ -40,6 +40,11 @@
  #include "flow/FileIdentifier.h"
  #include "flow/ObjectSerializerTraits.h"
  
-+//WIN32:
++#ifdef _WIN32
++// The MSVC standard library headers above do not include <stdexcept>.
 +#include <stdexcept>
++#endif
 +
  template <class T = pack<>, class...>
  struct concat {
  	using type = T;
 diff --git a/flow/include/flow/singleton.h b/flow/include/flow/singleton.h
-index 392e5a98b7..11749caef8 100644
+index 392e5a98b7..4c9781f2cb 100644
 --- a/flow/include/flow/singleton.h
 +++ b/flow/include/flow/singleton.h
-@@ -27,7 +27,7 @@
+@@ -27,11 +27,6 @@
  #include <cstdlib>
  #include <cassert>
  
 -#ifdef WIN32
-+#ifdef _WIN32
- #include <system_error>
- #include <Windows.h>
- #endif
+-#include <system_error>
+-#include <Windows.h>
+-#endif
+-
+ namespace crossbow {
+ 
+ /**
+@@ -42,37 +37,8 @@ namespace crossbow {
+  * holder.
+  */
+ 
+-#ifdef _WIN32
+-class WinLockGuard {
+-	HANDLE& mutex;
+-
+-public:
+-	explicit WinLockGuard(HANDLE& mutex) : mutex(mutex) {
+-		HANDLE result = CreateMutexA(nullptr, FALSE, nullptr);
+-		if (result == nullptr) {
+-			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+-		}
+-		mutex = result;
+-		if (WaitForSingleObject(mutex, INFINITE) != WAIT_OBJECT_0) {
+-			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+-		}
+-	}
+-
+-	~WinLockGuard() noexcept {
+-		if (!ReleaseMutex(mutex)) {
+-			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+-		}
+-	}
+-
+-	WinLockGuard(const WinLockGuard&) = delete;
+-	WinLockGuard& operator=(const WinLockGuard&) = delete;
+-};
+-#define MUTEX_GUARD WinLockGuard
+-#define MUTEX_TYPE HANDLE
+-#else
+ #define MUTEX_GUARD std::lock_guard<Mutex>
+ #define MUTEX_TYPE std::mutex
+-#endif
+ 
+ struct no_locking {
+ 	void lock() {}
 diff --git a/flow/include/flow/swift.h b/flow/include/flow/swift.h
-index c1e44ea053..bca65617c6 100644
+index c1e44ea053..f7c22df03d 100644
 --- a/flow/include/flow/swift.h
 +++ b/flow/include/flow/swift.h
-@@ -32,9 +32,18 @@
+@@ -32,9 +32,14 @@
  
  // ==== ----------------------------------------------------------------------------------------------------------------
  
@@ -348,12 +893,8 @@ index c1e44ea053..bca65617c6 100644
 -	return pthread_self();
 -}
 +
-+#ifdef _WIN32
-+	#include <windows.h>
-+	inline DWORD _tid() {
-+		return GetCurrentThreadId();
-+	}
-+#else
++#ifndef _WIN32
++	// No caller on Windows, which has no pthread_self().
 +	#include <pthread.h>
 +	inline pthread_t _tid() {
 +		return pthread_self();
