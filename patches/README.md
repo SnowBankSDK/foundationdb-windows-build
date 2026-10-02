@@ -2,7 +2,7 @@
 
 A stock `apple/foundationdb` checkout does not configure or compile on Windows. The patches here make
 CMake target Windows without Swift, replace POSIX-only code, and fix Windows-only bugs. For 7.3 and 7.4
-they also build the C# actor compiler out of band and stub TLS. `scripts\build-fdb.ps1` applies one branch
+they also build the C# actor compiler out of band. `scripts\build-fdb.ps1` applies one branch
 patch by release line, then its `-common` companion when the branch has one, then every patch under
 `extra\` that still fits.
 
@@ -17,10 +17,10 @@ From 8.0 on, a branch has two patch files:
 |---|---|---|
 | `windows-8.0.0.patch` | 8.0 tags | 28 |
 | `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 2 |
-| `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 16 |
-| `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag) | 16 |
+| `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 21 |
+| `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag); still stubs TLS and has none of the bug fixes below | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
-| `windows-7.3.52.patch` | every 7.3 tag | 8 |
+| `windows-7.3.52.patch` | every 7.3 tag | 13 |
 | `extra\knob-status-timeout-header.patch` | tags whose `ClientKnobs.h` still lacks the `#undef` (7.3.78 and later 7.3 tags) | 1 |
 | `extra\knob-status-timeout-source.patch` | tags where `windows.h` is included after the knob header in the two client sources that use the knob (7.3.78 and later 7.3 tags; harmless on 7.4) | 2 |
 | `vcpkg.json` | copied to the source root of every tag | manifest |
@@ -105,7 +105,7 @@ class (`Net2.cpp`), the range-read coroutines from `getExactRange` to `getRangeS
 shows no difference with and without these regions. The IR verifier in the build names any new function
 in this state; wrap it the same way.
 
-TLS: the 7.3 and 7.4 TLS stub is gone. The 8.0 Windows client connects to TLS clusters with the usual
+TLS: the 8.0 Windows client connects to TLS clusters with the usual
 `TLS_CERT_PATH`, `TLS_KEY_PATH` and `TLS_CA_PATH` options; a missing or untrusted certificate times out
 like on Linux.
 
@@ -170,11 +170,28 @@ Portability fixes (POSIX assumptions that break under clang-cl):
 - `flow/include/flow/flow.h`: `#include <windows.h>` on `_WIN32` instead of `pthread.h`.
 - `flow/include/flow/swift.h`: `_tid()` returns `GetCurrentThreadId()` on `_WIN32`.
 
-Code fixes and stubs:
+TLS (in `windows-7.4.8.patch` and `windows-7.3.52.patch`; `windows-7.4.7.patch` still stubs `Net2::initTLS`):
 
-- `flow/Net2.actor.cpp`. Wraps the `reloadCertificatesOnChange` actor and the body of `Net2::initTLS`
-  in `#if _WIN32 ... #else`, so `initTLS` returns immediately on Windows. Consequence: the Windows
-  `fdb_c.dll` does not do TLS.
+- `flow/include/flow/TLSConfig.actor.h`. `TLSConfig.actor.cpp` defines `PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP`
+  to make the private members of `TLSConfig` and `LoadedTLSConfig` public in that one file. The MSVC ABI
+  encodes access in symbol names, so the definition of `TLSConfig::loadAsync` (public) and its call in
+  `Net2::initTLS` (private) did not link, which is why the original port stubbed TLS. On Windows the
+  members now stay public everywhere, and the Windows client does TLS.
+
+Windows bug fixes (the same ones in the 7.3 patch):
+
+- `flow/include/flow/singleton.h`: every platform uses `std::mutex`; the Windows lock created a new
+  kernel mutex per use, so it excluded nothing.
+- `fdbclient/Tracing.actor.cpp`: `network_lossy` falls back to the no-op tracer on Windows instead of
+  leaving `g_tracer` pointing at the deleted tracer.
+- `flow/Platform.actor.cpp`: `startThread` uses `_beginthreadex` and `waitThread` closes the handle (the
+  C runtime closes a `_beginthread` handle at thread exit, so the join could wait on a recycled handle).
+- `flow/FileTraceLogWriter.cpp`: trace files opened with `_O_BINARY | _O_NOINHERIT`.
+- `fdbrpc/include/fdbrpc/AsyncFileWinASIO.actor.h`: the atomic-write rename uses `MoveFileExA` with
+  `MOVEFILE_REPLACE_EXISTING` and reports a failure.
+
+Other code fixes:
+
 - `fdbrpc/ActorFuzzUnitTest.cpp`: `#if !_WIN32` around `TEST_CASE("/actorFuzz")`.
 - `fdbclient/include/fdbclient/ClientKnobs.h` (new in 7.4.7): `#undef STATUS_TIMEOUT` under `_WIN32`
   after the includes. Upstream added a client knob with that name and `winnt.h` defines it as a macro.
@@ -185,7 +202,8 @@ Most 7.4 hacks address Swift, which 7.3 does not have, so the 7.3 set is smaller
 
 | 7.4 hunks | 7.3 |
 |---|---|
-| CompileActorCompiler.cmake, VFSAsync.cpp, Hash3.c, Net2.actor.cpp, Trace.cpp, AssemblyInfo.cs, flat_buffers.h | apply unchanged (7 files) |
+| CompileActorCompiler.cmake, VFSAsync.cpp, Hash3.c, Trace.cpp, AssemblyInfo.cs, flat_buffers.h | apply unchanged (6 files) |
+| TLSConfig.actor.h, singleton.h, Tracing.actor.cpp, Platform.actor.cpp, FileTraceLogWriter.cpp, AsyncFileWinASIO.actor.h | the TLS fix and the bug fixes, same as 7.4 (6 files) |
 | swift.h, S3Client_cli.actor.cpp, ActorFuzzUnitTest.cpp | files absent in 7.3, dropped |
 | fdbclient/CMakeLists.txt, RandomKeyValueUtils.h, flow.h | patched constructs absent in 7.3, dropped |
 | CMakeLists.txt | no Swift split; the `WIN32` block sets the Boost hints, the component trims and `WITH_DOCUMENTATION OFF`; guards `enable_testing` and `tests`; comments `packaging/msi` |
