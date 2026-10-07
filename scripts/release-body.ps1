@@ -14,6 +14,9 @@ param(
     [string] $OutFile = ''
 )
 
+# .NET file APIs resolve a relative path against the process directory, not the PowerShell location.
+[Environment]::CurrentDirectory = (Get-Location -PSProvider FileSystem).ProviderPath
+
 $ErrorActionPreference = 'Continue'
 if ([string]::IsNullOrEmpty($OutFile)) { $OutFile = Join-Path $ArtifactDir 'release-body.md' }
 $dll = Join-Path $ArtifactDir 'fdb_c.dll'

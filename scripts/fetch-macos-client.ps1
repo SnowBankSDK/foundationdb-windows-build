@@ -22,6 +22,9 @@ param(
     [switch] $KeepWork
 )
 
+# .NET file APIs resolve a relative path against the process directory, not the PowerShell location.
+[Environment]::CurrentDirectory = (Get-Location -PSProvider FileSystem).ProviderPath
+
 $ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrEmpty($ArtifactDir)) { $ArtifactDir = Join-Path $repoRoot "artifacts\$Tag" }

@@ -16,6 +16,9 @@ param(
     [switch] $NoDocker
 )
 
+# .NET file APIs resolve a relative path against the process directory, not the PowerShell location.
+[Environment]::CurrentDirectory = (Get-Location -PSProvider FileSystem).ProviderPath
+
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path -Parent $PSScriptRoot
 $script:failed = $false
