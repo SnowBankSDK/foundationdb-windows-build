@@ -63,7 +63,7 @@ $body = @(
     (Get-Line 'libfdb_c.x86_64.dylib'),
     (Get-Line 'fdbcli.x86_64'),
     '',
-    "Windows build: upstream tag ``$version`` (commit ``$source``), protocol ``$protocol``, $($toolchain -join ', '), $patchLine. The Windows client library supports TLS and is built without AVX instructions.",
+    "Windows build: upstream tag ``$version`` (commit ``$source``), protocol ``$protocol``, $($toolchain -join ', '), $patchLine. The Windows client library is built with TLS support and without AVX instructions.",
     "macOS files: the unmodified client payloads of the upstream ``FoundationDB-${version}_arm64.pkg`` and ``FoundationDB-${version}_x86_64.pkg``, renamed with their architecture."
 ) -join "`n"
 [System.IO.File]::WriteAllText($OutFile, $body + "`n", [System.Text.Encoding]::UTF8)
