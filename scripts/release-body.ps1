@@ -45,7 +45,7 @@ if (Test-Path $infoPath) {
 $toolchain = @()
 if ($info['clang']) { $toolchain += ($info['clang'] -replace '^clang version ', 'clang-cl ') }
 if ($info['cmake']) { $toolchain += ($info['cmake'] -replace '^cmake version ', 'CMake ') }
-$toolchain += 'Boost 1.86.0'
+$toolchain += if ($info['boost'] -match 'boost_(\d+)_(\d+)_(\d+)') { "Boost $($Matches[1]).$($Matches[2]).$($Matches[3])" } else { 'Boost 1.86.0' }
 $patchLine = if ($info['patch']) { "patch set ``$($info['patch'])``" } else { 'the patch set of this repository' }
 
 $body = @(
@@ -63,7 +63,7 @@ $body = @(
     (Get-Line 'libfdb_c.x86_64.dylib'),
     (Get-Line 'fdbcli.x86_64'),
     '',
-    "Windows build: upstream tag ``$version`` (commit ``$source``), protocol ``$protocol``, $($toolchain -join ', '), $patchLine. The Windows client library is built without TLS support and without AVX instructions.",
+    "Windows build: upstream tag ``$version`` (commit ``$source``), protocol ``$protocol``, $($toolchain -join ', '), $patchLine. The Windows client library supports TLS and is built without AVX instructions.",
     "macOS files: the unmodified client payloads of the upstream ``FoundationDB-${version}_arm64.pkg`` and ``FoundationDB-${version}_x86_64.pkg``, renamed with their architecture."
 ) -join "`n"
 [System.IO.File]::WriteAllText($OutFile, $body + "`n", [System.Text.Encoding]::UTF8)
