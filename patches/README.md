@@ -16,7 +16,7 @@ From 8.0 on, a branch has two patch files:
 | File | Applies to | Files touched |
 |---|---|---|
 | `windows-8.0.0.patch` | 8.0 tags | 28 |
-| `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 2 |
+| `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 3 |
 | `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 21 |
 | `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag); still stubs TLS and has none of the bug fixes below | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
@@ -110,14 +110,20 @@ TLS: the 8.0 Windows client connects to TLS clusters with the usual
 like on Linux.
 
 Common patch: `RandomKeyValueUtils.h` (`uint` to `unsigned int`) and `S3Client_cli.cpp` (`#import` to
-`#include`). Neither file is part of `fdb_c.dll` or `fdbcli.exe`.
+`#include`), which are not part of `fdb_c.dll` or `fdbcli.exe`, and the crash fix in `ThreadHelper.h`.
+
+The 8.0.0 client crashes its network thread under concurrent reads, on every platform (Apple's Linux build
+included): `doOnMainThread` releases its reference on the result before `final_suspend`, so a client thread
+that destroys the future frees the coroutine frame while the network thread still uses it. The fix releases
+the reference in a later task on the network thread. The 7.4 actor compiler kept the old order, so the 7.4
+and 7.3 patches need no change.
 
 Saving the 8.0 patches from a patched checkout (the first patch adds a file, hence `git add -N`):
 
 ```
 git add -N cmake/WindowsVersionInfo.rc.in
-git diff -- fdbclient/include/fdbclient/RandomKeyValueUtils.h fdbclient/S3Client_cli.cpp > windows-8.0.0-common.patch
-git diff -- . ":(exclude)fdbclient/include/fdbclient/RandomKeyValueUtils.h" ":(exclude)fdbclient/S3Client_cli.cpp" > windows-8.0.0.patch
+git diff -- fdbclient/include/fdbclient/RandomKeyValueUtils.h fdbclient/S3Client_cli.cpp flow/include/flow/ThreadHelper.h > windows-8.0.0-common.patch
+git diff -- . ":(exclude)fdbclient/include/fdbclient/RandomKeyValueUtils.h" ":(exclude)fdbclient/S3Client_cli.cpp" ":(exclude)flow/include/flow/ThreadHelper.h" > windows-8.0.0.patch
 ```
 
 ## The 7.4.8 port

@@ -24,3 +24,20 @@ index e0ad845db6..4690599500 100644
  		while (uniqueKeys.size() < indexGenerator.max) {
  			auto k = keyGen.next();
  			uniqueKeys.insert(k);
+diff --git a/flow/include/flow/ThreadHelper.h b/flow/include/flow/ThreadHelper.h
+index 1e0e91a12f..c04015a85f 100644
+--- a/flow/include/flow/ThreadHelper.h
++++ b/flow/include/flow/ThreadHelper.h
+@@ -839,8 +839,10 @@ Future<Void> doOnMainThread(Future<Void> signal,
+ 	}
+ 
+ 	function.destroy(result);
+-	ThreadFuture<R> destroyResultAfterReturning(
+-	    result); // Call result->delref(), but only after our return promise is no longer referenced on this thread
++	// A coroutine destroys its locals before final_suspend, so a local ThreadFuture would release this reference while
++	// final_suspend still updates the promise of this coroutine. Another thread could then destroy the result, and with it
++	// cancelFuture, and race that update. Release the reference in a later task on this thread instead.
++	onMainThreadVoid([result]() { result->delref(); });
+ 	co_return Void();
+ }
+ 

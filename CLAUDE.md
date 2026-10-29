@@ -311,7 +311,7 @@ patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), 
 patches\windows-7.4.7.patch    the 7.4 patch set up to 7.4.7 (16 files)
 patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (21 files)
 patches\windows-8.0.0.patch    the 8.0 patch set, Windows-only hunks (28 files, one new: cmake\WindowsVersionInfo.rc.in)
-patches\windows-8.0.0-common.patch  the 8.0 hunks that change code shared with Linux and macOS (2 files)
+patches\windows-8.0.0-common.patch  the 8.0 hunks that change code shared with Linux and macOS (3 files)
 patches\extra\*.patch          fixes tried on every tag and applied when they fit
 patches\vcpkg.json             the vcpkg manifest (zlib, lz4, pinned baseline)
 patches\README.md              what each hunk group does and how to port the set to a new tag
