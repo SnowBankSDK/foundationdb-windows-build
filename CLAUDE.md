@@ -64,8 +64,10 @@ install or rebuild.
    read the tag's section in `documentation/sphinx/source/release-notes/release-notes-<branch>.rst`.
    Summarize for the maintainer, in this order: client-side fixes and changes (`fdbclient/`,
    `bindings/c/`, `fdbcli/`), changes that touch the Windows patch set (`CMakeLists.txt`, `cmake/`,
-   `flow/`), then server-only, backup and tooling changes. Close with one line on urgency for the .NET
-   client. The summary decides whether the release is worth the work of a Windows build and package.
+   `flow/`), then server-only, backup and tooling changes. Close with one line on urgency. Every release
+   gets built and packaged; urgency only decides how soon. The .NET client package redistributes the
+   client library for Windows, Linux and macOS, while the server comes from the upstream Docker image.
+   So an important client fix on any of the three platforms means hurry. Server-only changes never do.
 1. `.\scripts\check-prereqs.ps1` (section 1).
 2. `.\scripts\build-boost.ps1` once per clang major (section 3). Skip it when the check already passes
    the "Boost stage" row.
