@@ -119,9 +119,9 @@ What the script does, in order, with a timestamped `=== phase ===` line for each
    it sets `LLVMInstallDir` and `LLVMToolsVersion` in the environment, where MSBuild picks them up for
    the ClangCL toolset, and it stops when an 8.0 build finds a clang-cl older than 22.1.7.
 2. Clones `apple/foundationdb` and checks out the tag. It refuses a checkout with local changes.
-3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.8.patch`
-   for 7.4.8 and later, `patches\windows-7.4.7.patch` for earlier 7.4 tags, `patches\windows-8.0.0.patch`
-   for an 8.0 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag, then the
+3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.9.patch`
+   for 7.4.9 and later, `patches\windows-7.4.8.patch` for 7.4.8, `patches\windows-7.4.7.patch` for
+   earlier 7.4 tags, `patches\windows-8.0.0.patch` for an 8.0 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag, then the
    branch's `-common` companion when one exists (`patches\windows-8.0.0-common.patch`). It then
    tries every `patches\extra\*.patch` and applies the ones that fit. It copies `patches\vcpkg.json` to the
    source root and, when `-BoostRoot` is not the default, rewrites the `BOOST_ROOT` line the patch sets.
@@ -281,8 +281,9 @@ release check) is a safe rehearsal.
 - **Configure resolves Python to the Microsoft Store alias, or `Jinja2` is missing.** Both work: the
   Store Python is a real interpreter, and without `jinja2` the upstream CMake creates a venv and installs
   it. A failure inside that venv step means no `python.exe` on `PATH`.
-- **`git` warns "LF will be replaced by CRLF".** Harmless; the patches are applied and diffed by git,
-  which normalizes line endings.
+- **`git` warns "LF will be replaced by CRLF".** Harmless for the FoundationDB checkout. The patch files
+  themselves must stay LF on disk (`.gitattributes` sets `eol=lf` for `*.patch`): a CRLF patch fails on a
+  hunk that ends at a source line without a final newline, such as `fdbrpc/ActorFuzzUnitTest.cpp`.
 - **`fetch-macos-client.ps1` fails a layer** (`xar layer`, `gzip layer` or `cpio layer`). 7-Zip is absent
   or too old (26.02 proven), or upstream changed the package layout; run the three `7z x` steps by hand
   on the package under `artifacts\<tag>\macos-pkg\<arch>\` (kept with `-KeepWork`) and look for the
@@ -309,7 +310,8 @@ scripts\release-manifest.ps1   release and asset check through gh, hash comparis
 patches\windows-7.3.52.patch   the 7.3 branch patch set (13 files)
 patches\windows-7.4.6.patch    the 7.4 patch set as built for 7.4.6 (15 files), kept for reference
 patches\windows-7.4.7.patch    the 7.4 patch set up to 7.4.7 (16 files)
-patches\windows-7.4.8.patch    the 7.4 patch set from 7.4.8 (21 files)
+patches\windows-7.4.8.patch    the 7.4 patch set for 7.4.8 (21 files)
+patches\windows-7.4.9.patch    the 7.4 patch set from 7.4.9 (21 files)
 patches\windows-8.0.0.patch    the 8.0 patch set, Windows-only hunks (28 files, one new: cmake\WindowsVersionInfo.rc.in)
 patches\windows-8.0.0-common.patch  the 8.0 hunks that change code shared with Linux and macOS (3 files)
 patches\extra\*.patch          fixes tried on every tag and applied when they fit

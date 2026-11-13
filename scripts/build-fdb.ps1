@@ -103,7 +103,8 @@ try {
         '7.3' { $patchName = 'windows-7.3.52.patch'; $cxxFlags = '/DWIN32 /D_WINDOWS /Zc:__cplusplus' }
         '7.4' {
             # 7.4.8 made Swift optional and moved the Windows Boost lookup to config mode, so the 7.4.7 patch stops fitting there.
-            $patchName = if ($version -ge [version]'7.4.8') { 'windows-7.4.8.patch' } else { 'windows-7.4.7.patch' }
+            # 7.4.9 added a Linux-only block between two CMakeLists.txt edits, so the 7.4.8 patch stops fitting there.
+            $patchName = if ($version -ge [version]'7.4.9') { 'windows-7.4.9.patch' } elseif ($version -ge [version]'7.4.8') { 'windows-7.4.8.patch' } else { 'windows-7.4.7.patch' }
             $cxxFlags = '/Zc:__cplusplus'
         }
         '8.0' {

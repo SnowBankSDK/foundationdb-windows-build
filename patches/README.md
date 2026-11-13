@@ -17,7 +17,8 @@ From 8.0 on, a branch has two patch files:
 |---|---|---|
 | `windows-8.0.0.patch` | 8.0 tags | 28 |
 | `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 3 |
-| `windows-7.4.8.patch` | 7.4.8 and later 7.4 tags | 21 |
+| `windows-7.4.9.patch` | 7.4.9 and later 7.4 tags | 21 |
+| `windows-7.4.8.patch` | 7.4.8 | 21 |
 | `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag); still stubs TLS and has none of the bug fixes below | 16 |
 | `windows-7.4.6.patch` | 7.4.6 as built; kept for reference, not applied by the script | 15 |
 | `windows-7.3.52.patch` | every 7.3 tag | 13 |
@@ -137,6 +138,12 @@ Upstream 7.4.8 changed two things the 7.4.7 patch relied on, and `windows-7.4.8.
   `${BOOST_ROOT}/stage` to `CMAKE_PREFIX_PATH`, where `b2 stage` writes `lib/cmake/Boost-1.86.0`.
 
 The other 15 files carry the 7.4.7 hunks unchanged. The description below covers both patches.
+
+## The 7.4.9 port
+
+Upstream 7.4.9 added an `if(RHEL9_BASED)` block to `CMakeLists.txt` between the documentation block and
+the `packaging/msi` line. Both edits stay the same, and `windows-7.4.9.patch` carries them as two hunks
+instead of one. The other 20 files carry the 7.4.8 hunks unchanged, at new line offsets.
 
 ## The 7.4 patch, hunk by hunk
 
