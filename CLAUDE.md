@@ -59,6 +59,13 @@ install or rebuild.
 
 ## 2. Order of operations
 
+0. Triage the new tag against the previous tag on the same branch, before any build. List the commits
+   with `git log --no-merges --format='%h %ad %an | %s' --date=short <previous>..<tag>` in a clone, and
+   read the tag's section in `documentation/sphinx/source/release-notes/release-notes-<branch>.rst`.
+   Summarize for the maintainer, in this order: client-side fixes and changes (`fdbclient/`,
+   `bindings/c/`, `fdbcli/`), changes that touch the Windows patch set (`CMakeLists.txt`, `cmake/`,
+   `flow/`), then server-only, backup and tooling changes. Close with one line on urgency for the .NET
+   client. The summary decides whether the release is worth the work of a Windows build and package.
 1. `.\scripts\check-prereqs.ps1` (section 1).
 2. `.\scripts\build-boost.ps1` once per clang major (section 3). Skip it when the check already passes
    the "Boost stage" row.
@@ -67,6 +74,10 @@ install or rebuild.
 5. For a release: `.\scripts\fetch-macos-client.ps1 -Tag <tag>`, then the routine of section 6.
 
 One build at a time per host. A build is compile-bound and uses every core.
+
+Upstream publishes a GitHub release before its Docker image and its Linux and macOS files. For 7.4.8 the
+image came 5.5 hours later and the files 19 hours later. Steps 0 to 3 fit on release day; plan the smoke
+test of step 4 and the release of step 5 for the next day.
 
 ## 3. Boost
 

@@ -19,6 +19,10 @@ at the repository root is the full checklist; this skill is the short form for a
 
 Run from the repository root, in Windows PowerShell 5.1 or PowerShell 7, one build at a time per host.
 
+0. Triage, before any build: summarize the commits since the previous tag on the same branch and the
+   tag's upstream release notes, client-side changes first, then changes near the patch set, then the
+   rest, with one line on urgency. `CLAUDE.md` section 2 has the commands and the order.
+
 1. Prerequisites. Stop on any `FAIL` row and fix it (section 1 of `CLAUDE.md` says what each one needs).
 
    ```powershell
