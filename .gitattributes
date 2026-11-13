@@ -1,0 +1,3 @@
+# git apply needs the patches with LF line endings: a CRLF patch fails on a hunk that ends at a
+# source line without a final newline (fdbrpc/ActorFuzzUnitTest.cpp).
+*.patch text eol=lf
