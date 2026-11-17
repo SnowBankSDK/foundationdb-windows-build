@@ -15,8 +15,10 @@ From 8.0 on, a branch has two patch files:
 
 | File | Applies to | Files touched |
 |---|---|---|
-| `windows-8.0.0.patch` | 8.0 tags | 28 |
-| `windows-8.0.0-common.patch` | 8.0 tags, after `windows-8.0.0.patch` | 3 |
+| `windows-8.0.1.patch` | 8.0.1 and later 8.0 tags | 28 |
+| `windows-8.0.1-common.patch` | 8.0.1 and later 8.0 tags, after `windows-8.0.1.patch` | 2 |
+| `windows-8.0.0.patch` | 8.0.0 | 28 |
+| `windows-8.0.0-common.patch` | 8.0.0, after `windows-8.0.0.patch` | 3 |
 | `windows-7.4.9.patch` | 7.4.9 and later 7.4 tags | 21 |
 | `windows-7.4.8.patch` | 7.4.8 | 21 |
 | `windows-7.4.7.patch` | 7.4 tags up to 7.4.7 (the script rewrites the `VERSION` context to the tag); still stubs TLS and has none of the bug fixes below | 16 |
@@ -117,14 +119,21 @@ The 8.0.0 client crashes its network thread under concurrent reads, on every pla
 included): `doOnMainThread` releases its reference on the result before `final_suspend`, so a client thread
 that destroys the future frees the coroutine frame while the network thread still uses it. The fix releases
 the reference in a later task on the network thread. The 7.4 actor compiler kept the old order, so the 7.4
-and 7.3 patches need no change.
+and 7.3 patches need no change. Upstream fixed the crash in 8.0.1 (apple/foundationdb PR 14373): it detaches
+the cancellation future on the network thread before it releases the reference.
 
-Saving the 8.0 patches from a patched checkout (the first patch adds a file, hence `git add -N`):
+The 8.0.1 port: 8.0.1 added a RHEL 9 block above the `if(WIN32)` CPack block of `CMakeLists.txt`, changed the
+`maxInsertTry` line of `RandomKeyValueUtils.h` (still `uint`), and carries the upstream `ThreadHelper.h` fix.
+`windows-8.0.1.patch` has the same 28 files as `windows-8.0.0.patch`, and `windows-8.0.1-common.patch` drops
+`ThreadHelper.h`.
+
+Saving the 8.0 patches from a patched checkout of 8.0.1 or later (the first patch adds a file, hence
+`git add -N`):
 
 ```
 git add -N cmake/WindowsVersionInfo.rc.in
-git diff -- fdbclient/include/fdbclient/RandomKeyValueUtils.h fdbclient/S3Client_cli.cpp flow/include/flow/ThreadHelper.h > windows-8.0.0-common.patch
-git diff -- . ":(exclude)fdbclient/include/fdbclient/RandomKeyValueUtils.h" ":(exclude)fdbclient/S3Client_cli.cpp" ":(exclude)flow/include/flow/ThreadHelper.h" > windows-8.0.0.patch
+git diff -- fdbclient/include/fdbclient/RandomKeyValueUtils.h fdbclient/S3Client_cli.cpp > windows-8.0.1-common.patch
+git diff -- . ":(exclude)fdbclient/include/fdbclient/RandomKeyValueUtils.h" ":(exclude)fdbclient/S3Client_cli.cpp" > windows-8.0.1.patch
 ```
 
 ## The 7.4.8 port

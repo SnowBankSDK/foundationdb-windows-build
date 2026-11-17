@@ -1,0 +1,26 @@
+diff --git a/fdbclient/S3Client_cli.cpp b/fdbclient/S3Client_cli.cpp
+index be988ad23b..361b4b86f0 100644
+--- a/fdbclient/S3Client_cli.cpp
++++ b/fdbclient/S3Client_cli.cpp
+@@ -31,7 +31,7 @@
+ #endif
+ 
+ #include "fdbclient/BuildFlags.h"
+-#import "fdbclient/BackupTLSConfig.h"
++#include "fdbclient/BackupTLSConfig.h"
+ #include "fdbclient/Knobs.h"
+ #include "fdbclient/NativeAPI.h"
+ #include "fdbclient/versions.h"
+diff --git a/fdbclient/include/fdbclient/RandomKeyValueUtils.h b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
+index 306f9d5885..3f47d8d131 100644
+--- a/fdbclient/include/fdbclient/RandomKeyValueUtils.h
++++ b/fdbclient/include/fdbclient/RandomKeyValueUtils.h
+@@ -225,7 +225,7 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
+ 		int inserts = 0;
+ 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
+ 		// It adds roughly log(max) * 100. (total_bits - count_leading_zero_bits = high_set_bit_pos)
+-		const uint maxInsertTry = 3 * indexGenerator.max + (((uint)(sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
++		const unsigned int maxInsertTry = 3 * indexGenerator.max + (((unsigned int)(sizeof(unsigned int) * 8) - clz(indexGenerator.max)) * 100);
+ 		while (uniqueKeys.size() < indexGenerator.max) {
+ 			auto k = keyGen.next();
+ 			uniqueKeys.insert(k);

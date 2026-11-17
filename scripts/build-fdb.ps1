@@ -108,7 +108,9 @@ try {
             $cxxFlags = '/Zc:__cplusplus'
         }
         '8.0' {
-            $patchName = 'windows-8.0.0.patch'
+            # 8.0.1 added a RHEL 9 block above a CMakeLists.txt edit, changed a RandomKeyValueUtils.h line, and fixed the
+            # doOnMainThread crash upstream, so the 8.0.0 patches stop fitting there.
+            $patchName = if ($version -ge [version]'8.0.1') { 'windows-8.0.1.patch' } else { 'windows-8.0.0.patch' }
             # The IR verifier stops the build on a function that clang-cl compiled into invalid code: clang-cl
             # 23 does that to some coroutines with exception handling, and the result crashes at run time.
             $cxxFlags = '/Zc:__cplusplus /clang:-fverify-intermediate-code'

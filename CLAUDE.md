@@ -134,8 +134,8 @@ What the script does, in order, with a timestamped `=== phase ===` line for each
 2. Clones `apple/foundationdb` and checks out the tag. It refuses a checkout with local changes.
 3. Applies the branch patch: `patches\windows-7.3.52.patch` for a 7.3 tag, `patches\windows-7.4.9.patch`
    for 7.4.9 and later, `patches\windows-7.4.8.patch` for 7.4.8, `patches\windows-7.4.7.patch` for
-   earlier 7.4 tags, `patches\windows-8.0.0.patch` for an 8.0 tag, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag, then the
-   branch's `-common` companion when one exists (`patches\windows-8.0.0-common.patch`). It then
+   earlier 7.4 tags, `patches\windows-8.0.1.patch` for 8.0.1 and later, `patches\windows-8.0.0.patch` for 8.0.0, after rewriting the `VERSION x.y.z` lines of the patch to the requested tag, then the
+   branch's `-common` companion when one exists (`patches\windows-8.0.1-common.patch`). It then
    tries every `patches\extra\*.patch` and applies the ones that fit. It copies `patches\vcpkg.json` to the
    source root and, when `-BoostRoot` is not the default, rewrites the `BOOST_ROOT` line the patch sets.
 4. Configures with CMake: generator `Visual Studio 17 2022`, platform `x64`, toolset `ClangCL`, the
