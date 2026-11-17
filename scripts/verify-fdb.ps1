@@ -68,7 +68,13 @@ if ($null -eq $dumpbin) {
         $parts = ($_.Trim() -split '\s+')
         if ($parts.Count -ge 4 -and $parts[0] -match '^\d+$' -and $parts[2] -match '^[0-9A-Fa-f]{8}$') { $parts[3] }
     } | Sort-Object)
+    # exports-<line>.txt holds the export set from the first tag of the line. A tag that changes it gets its own
+    # exports-<tag>.txt, which counts for that tag and the later ones (8.0.1 restored the blob granule symbols as stubs).
     $referencePath = Join-Path $repo "reference\exports-$line.txt"
+    $since = Get-ChildItem (Join-Path $repo 'reference') -Filter "exports-$line.*.txt" |
+        Where-Object { $_.BaseName -match '^exports-(\d+\.\d+\.\d+)$' -and [version]$Matches[1] -le $v } |
+        Sort-Object { [version]($_.BaseName -replace '^exports-', '') } | Select-Object -Last 1
+    if ($since) { $referencePath = $since.FullName }
     if (-not (Test-Path $referencePath)) {
         Gate 'exports' $false "no reference list for line $line ($referencePath); $($names.Count) exports found"
     } else {
